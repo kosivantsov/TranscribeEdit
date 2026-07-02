@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%">
+  <defs>
+    <!-- Outer drop shadow for the keycap -->
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000000" flood-opacity="0.25"/>
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.15"/>
+    </filter>
+
+    <!-- Base keycap bevel (Simulates the outer plastic skirt and bottom 3D lip) -->
+    <linearGradient id="baseGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#EAEAEA"/>
+      <stop offset="15%" stop-color="#CFCFCF"/>
+      <stop offset="100%" stop-color="#888888"/>
+    </linearGradient>
+
+    <!-- Top surface of the keycap (Lighter grey/beige look) -->
+    <linearGradient id="topGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#F2F2F2"/>
+      <stop offset="100%" stop-color="#D5D5D5"/>
+    </linearGradient>
+    
+    <!-- Subtle rim highlight/shadow for realism on the top edge -->
+    <linearGradient id="rimGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.9"/>
+      <stop offset="15%" stop-color="#FFFFFF" stop-opacity="0.2"/>
+      <stop offset="85%" stop-color="#000000" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.2"/>
+    </linearGradient>
+
+    <!-- Waveform teal/greenish color gradient -->
+    <linearGradient id="waveGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2EF2D7"/>
+      <stop offset="100%" stop-color="#0E9885"/>
+    </linearGradient>
+    
+    <!-- Subtle print effect for the waveform legend -->
+    <filter id="legendPrint" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="0.5" flood-color="#FFFFFF" flood-opacity="0.75"/>
+    </filter>
+  </defs>
+
+  <!-- Keycap Outer Base (The main 3D chunk) -->
+  <rect x="40" y="40" width="420" height="430" rx="40" ry="40" fill="url(#baseGrad)" filter="url(#shadow)"/>
+  
+  <!-- Keycap Top Surface (Shifted up slightly to reveal the thicker bottom edge perspective) -->
+  <rect x="65" y="55" width="370" height="360" rx="28" ry="28" fill="url(#topGrad)"/>
+  
+  <!-- Keycap Bevel / Inner Rim Edge -->
+  <rect x="65" y="55" width="370" height="360" rx="28" ry="28" fill="none" stroke="url(#rimGrad)" stroke-width="3"/>
+
+  <!-- Dynamic Waveform Group -->
+  <g fill="url(#waveGrad)" filter="url(#legendPrint)">
+    <!-- 25 narrow bars forming an active, hopping waveform -->
+    <rect x="102" y="227.5" width="8" height="15"  rx="4" ry="4"/>
+    <rect x="114" y="217.5" width="8" height="35"  rx="4" ry="4"/>
+    <rect x="126" y="227.5" width="8" height="15"  rx="4" ry="4"/>
+    <rect x="138" y="195"   width="8" height="80"  rx="4" ry="4"/>
+    <rect x="150" y="222.5" width="8" height="25"  rx="4" ry="4"/>
+    <rect x="162" y="180"   width="8" height="110" rx="4" ry="4"/>
+    <rect x="174" y="212.5" width="8" height="45"  rx="4" ry="4"/>
+    <rect x="186" y="155"   width="8" height="160" rx="4" ry="4"/>
+    <rect x="198" y="205"   width="8" height="60"  rx="4" ry="4"/>
+    <rect x="210" y="135"   width="8" height="200" rx="4" ry="4"/>
+    <rect x="222" y="185"   width="8" height="100" rx="4" ry="4"/>
+    
+    <!-- Central Peak -->
+    <rect x="234" y="115"   width="8" height="240" rx="4" ry="4"/>
+    
+    <rect x="246" y="200"   width="8" height="70"  rx="4" ry="4"/>
+    <rect x="258" y="145"   width="8" height="180" rx="4" ry="4"/>
+    <rect x="270" y="170"   width="8" height="130" rx="4" ry="4"/>
+    <rect x="282" y="130"   width="8" height="210" rx="4" ry="4"/>
+    <rect x="294" y="190"   width="8" height="90"  rx="4" ry="4"/>
+    <rect x="306" y="160"   width="8" height="150" rx="4" ry="4"/>
+    <rect x="318" y="210"   width="8" height="50"  rx="4" ry="4"/>
+    <rect x="330" y="175"   width="8" height="120" rx="4" ry="4"/>
+    <rect x="342" y="220"   width="8" height="30"  rx="4" ry="4"/>
+    <rect x="354" y="195"   width="8" height="80"  rx="4" ry="4"/>
+    <rect x="366" y="225"   width="8" height="20"  rx="4" ry="4"/>
+    <rect x="378" y="215"   width="8" height="40"  rx="4" ry="4"/>
+    <rect x="390" y="227.5" width="8" height="15"  rx="4" ry="4"/>
+  </g>
+</svg>

@@ -1,0 +1,5 @@
+PyQt5
+pyqtdarktheme
+python-mpv
+numpy
+requests
