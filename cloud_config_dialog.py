@@ -1,10 +1,10 @@
+# cloud_config_dialog.py
 import json
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, 
                              QLabel, QLineEdit, QPushButton, QComboBox, 
                              QTableWidget, QTableWidgetItem, QHeaderView, 
-                             QColorDialog, QFontDialog, QTabWidget, QWidget,
-                             QInputDialog, QMessageBox, QFrame, QCheckBox)
-from PyQt5.QtGui import QColor, QFont
+                             QTabWidget, QWidget, QInputDialog, QMessageBox, 
+                             QFrame, QCheckBox)
 from PyQt5.QtCore import Qt, QSettings
 
 class CloudConfigDialog(QDialog):
@@ -241,7 +241,6 @@ class CloudConfigDialog(QDialog):
 
 
     def delete_profile(self):
-        # --- FIX: Safely target exactly what is visible in the combobox ---
         target_profile = self.profile_combo.currentText()
         
         if len(self.profiles) <= 1:
@@ -284,111 +283,3 @@ class CloudConfigDialog(QDialog):
     def accept(self):
         self.save_current_profile()
         super().accept()
-
-class SpeakerConfigDialog(QDialog):
-    def __init__(self, parent, current_speakers):
-        super().__init__(parent)
-        self.setWindowTitle(self.tr("Speaker Configuration"))
-        self.setMinimumWidth(300)
-        self.result_speakers = []
-
-        layout = QVBoxLayout(self)
-        self.edits = []
-        for i in range(6):
-            row = QHBoxLayout()
-            row.addWidget(QLabel(self.tr("Speaker {0}:").format(i+1)))
-            edit = QLineEdit(current_speakers[i] if i < len(current_speakers) else f"SPEAKER_0{i}")
-            self.edits.append(edit)
-            row.addWidget(edit)
-            layout.addLayout(row)
-
-        btn_row = QHBoxLayout()
-        ok_btn = QPushButton(self.tr("Save"))
-        ok_btn.clicked.connect(self.accept)
-        cancel_btn = QPushButton(self.tr("Cancel"))
-        cancel_btn.clicked.connect(self.reject)
-        btn_row.addWidget(ok_btn)
-        btn_row.addWidget(cancel_btn)
-        layout.addLayout(btn_row)
-
-    def accept(self):
-        self.result_speakers = [e.text().strip() for e in self.edits]
-        super().accept()
-
-class EditorConfigDialog(QDialog):
-    def __init__(self, parent, config):
-        super().__init__(parent)
-        self.setWindowTitle(self.tr("Editor Configuration"))
-        self.setMinimumWidth(400)
-        self.config = config.copy()
-
-        layout = QVBoxLayout(self)
-        grid = QGridLayout()
-
-        labels = [
-            ("text_fg", self.tr("General Text Foreground")),
-            ("text_bg", self.tr("General Text Background")),
-            ("ts_fg", self.tr("Timestamp Foreground")),
-            ("ts_bg", self.tr("Timestamp Background")),
-            ("spk_fg", self.tr("Speaker Tag Foreground")),
-            ("spk_bg", self.tr("Speaker Tag Background")),
-        ]
-        
-        self.color_btns = {}
-        for i, (key, label) in enumerate(labels):
-            grid.addWidget(QLabel(label), i, 0)
-            btn = QPushButton()
-            self._update_btn_color(btn, self.config.get(key, ""))
-            btn.clicked.connect(lambda checked, k=key, b=btn: self._pick_color(k, b))
-            grid.addWidget(btn, i, 1)
-
-            clear_btn = QPushButton(self.tr("Clear"))
-            clear_btn.clicked.connect(lambda checked, k=key, b=btn: self._clear_color(k, b))
-            grid.addWidget(clear_btn, i, 2)
-            self.color_btns[key] = btn
-
-        layout.addLayout(grid)
-
-        font_layout = QHBoxLayout()
-        font_layout.addWidget(QLabel(self.tr("Editor Font:")))
-        self.font_btn = QPushButton(self.tr("Select Font..."))
-        self.font_btn.clicked.connect(self._pick_font)
-        font_layout.addWidget(self.font_btn)
-        layout.addLayout(font_layout)
-
-        btn_row = QHBoxLayout()
-        ok_btn = QPushButton(self.tr("Save"))
-        ok_btn.clicked.connect(self.accept)
-        cancel_btn = QPushButton(self.tr("Cancel"))
-        cancel_btn.clicked.connect(self.reject)
-        btn_row.addWidget(ok_btn)
-        btn_row.addWidget(cancel_btn)
-        layout.addLayout(btn_row)
-
-    def _update_btn_color(self, btn, color_str):
-        if color_str:
-            btn.setStyleSheet(f"background-color: {color_str};")
-            btn.setText("")
-        else:
-            btn.setStyleSheet("")
-            btn.setText(self.tr("Default"))
-
-    def _clear_color(self, key, btn):
-        self.config[key] = ""
-        self._update_btn_color(btn, "")
-
-    def _pick_color(self, key, btn):
-        initial = QColor(self.config.get(key, "#ffffff")) if self.config.get(key) else Qt.white
-        color = QColorDialog.getColor(initial, self, self.tr("Select Color"))
-        if color.isValid():
-            hex_color = color.name()
-            self.config[key] = hex_color
-            self._update_btn_color(btn, hex_color)
-
-    def _pick_font(self):
-        font = QFont()
-        if self.config.get("font"):
-            font.fromString(self.config["font"])
-        font, ok = QFontDialog.getFont(font, self, self.tr("Select Editor Font"))
-        if ok:
-            self.config["font"] = font.toString()

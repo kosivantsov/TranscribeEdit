@@ -3,3 +3,4 @@ pyqtdarktheme
 python-mpv
 numpy
 requests
+markdown
