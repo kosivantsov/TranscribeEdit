@@ -1,6 +1,7 @@
 # menu_builder.py
 import platform
 from PyQt5.QtWidgets import QAction, QMenuBar, QMenu
+from PyQt5.QtGui import QKeySequence
 from PyQt5.QtCore import Qt
 
 def build_main_menu(window) -> dict:
@@ -52,7 +53,7 @@ def build_main_menu(window) -> dict:
     cloud_transcribe_action = QAction(window.tr("Transcribe (Cloud API)"), window)
     cloud_transcribe_action.triggered.connect(window.send_to_cloud)
     file_menu.addAction(cloud_transcribe_action)
-    
+
     handy_transcribe_action = QAction(window.tr("Transcribe with Handy Tool"), window)
     handy_transcribe_action.triggered.connect(window.transcribe_with_handy)
     file_menu.addAction(handy_transcribe_action)
@@ -67,21 +68,23 @@ def build_main_menu(window) -> dict:
 
     # --- EXPORT MENU ---
     export_menu = menubar.addMenu(window.tr("Export"))
-    
+
     default_fmt = window.settings.value("export_default_format", "srt")
     def_export_action = QAction(window.tr(f"Export Default ({default_fmt.upper()})"), window)
     # Late binding: fetch the setting at the moment of triggering, not creation!
-    def_export_action.triggered.connect(lambda checked: window.export_file(window.settings.value("export_default_format", "srt")))
+    def_export_action.triggered.connect(
+        lambda checked: window.export_file(window.settings.value("export_default_format", "srt"))
+    )
     export_menu.addAction(def_export_action)
     actions["Export Default"] = def_export_action
-    
+
     export_menu.addSeparator()
-    
+
     formats = [
-        ("SRT", "srt"), ("WebVTT", "vtt"), ("ASS/SSA", "ass"), 
+        ("SRT", "srt"), ("WebVTT", "vtt"), ("ASS/SSA", "ass"),
         ("TTML", "ttml"), ("Markdown", "md"), ("HTML", "html")
     ]
-    
+
     for label, fmt in formats:
         action = QAction(window.tr(f"Export {label}..."), window)
         action.triggered.connect(lambda checked, f=fmt: window.export_file(f))
@@ -96,23 +99,28 @@ def build_main_menu(window) -> dict:
 
     # --- OPTIONS MENU ---
     options_menu = menubar.addMenu(window.tr("Options"))
-    
+
     cloud_config_action = QAction(window.tr("Cloud API Configuration..."), window)
     cloud_config_action.triggered.connect(window.open_cloud_config)
     options_menu.addAction(cloud_config_action)
-    
+
     preferences_action = QAction(window.tr("Preferences..."), window)
     preferences_action.setMenuRole(QAction.PreferencesRole)
     preferences_action.triggered.connect(window.open_preferences_dialog)
+    # macOS: Cmd+, is handled automatically via PreferencesRole.
+    # Windows / Linux: bind Ctrl+F12.
+    if platform.system() != 'Darwin':
+        preferences_action.setShortcut(QKeySequence("Ctrl+F12"))
     options_menu.addAction(preferences_action)
+    actions["Preferences"] = preferences_action
 
     # --- HELP MENU ---
     help_menu = menubar.addMenu(window.tr("Help"))
-    
+
     online_help_action = QAction(window.tr("Online Help"), window)
     online_help_action.triggered.connect(window.open_online_help)
     help_menu.addAction(online_help_action)
-    
+
     about_action = QAction(window.tr("About TranscribeEdit"), window)
     about_action.setMenuRole(QAction.AboutRole)
     about_action.triggered.connect(window.show_about)

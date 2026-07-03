@@ -57,33 +57,87 @@ class TranscriptHighlighter(QSyntaxHighlighter):
         self.ts_pattern = TIMESTAMP_RE
         self.spk_pattern = re.compile(r'⟪[^⟫]+⟫')
 
+    # ------------------------------------------------------------------
+    # Helper: merge src format properties into the already-set format at
+    # [pos, pos+length) without erasing properties set by earlier passes.
+    # ------------------------------------------------------------------
+    def _merge_format(self, pos, length, src_fmt):
+        if length <= 0:
+            return
+        existing = self.format(pos)
+        existing.merge(src_fmt)
+        self.setFormat(pos, length, existing)
+
     def update_formats(self, colors):
+        # --- Timestamp ---
         self.ts_format = QTextCharFormat()
         if colors.get("ts_fg"):
             self.ts_format.setForeground(QColor(colors["ts_fg"]))
         if colors.get("ts_bg"):
             self.ts_format.setBackground(QColor(colors["ts_bg"]))
+        if colors.get("ts_font"):
+            f = QFont()
+            f.fromString(colors["ts_font"])
+            self.ts_format.setFont(f)
 
+        # --- Speaker tag ---
         self.spk_format = QTextCharFormat()
         if colors.get("spk_fg"):
             self.spk_format.setForeground(QColor(colors["spk_fg"]))
         if colors.get("spk_bg"):
             self.spk_format.setBackground(QColor(colors["spk_bg"]))
+        if colors.get("spk_font"):
+            f = QFont()
+            f.fromString(colors["spk_font"])
+            self.spk_format.setFont(f)
 
+        # --- Headings ---
         if colors.get("md_heading_fg"):
             self._heading_fmt.setForeground(QColor(colors["md_heading_fg"]))
 
+        # --- Horizontal rule ---
         if colors.get("md_hr_fg"):
             self.hr_color = QColor(colors["md_hr_fg"])
             self._hr_fmt.setForeground(self.hr_color)
 
+        # --- List ---
         if colors.get("md_list_bg"):
             self._list_bg_fmt.setBackground(QColor(colors["md_list_bg"]))
         if colors.get("md_list_marker_fg"):
             self._list_marker_fmt.setForeground(QColor(colors["md_list_marker_fg"]))
 
+        # --- Markup symbols ---
         if colors.get("md_markup_fg"):
             self._markup_fmt.setForeground(QColor(colors["md_markup_fg"]))
+        if colors.get("md_markup_font"):
+            f = QFont()
+            f.fromString(colors["md_markup_font"])
+            self._markup_fmt.setFont(f)
+
+        # --- Code span ---
+        # Rebuild from scratch so clearing a value goes back to defaults.
+        self._code_fmt = QTextCharFormat()
+        if colors.get("md_code_font"):
+            f = QFont()
+            f.fromString(colors["md_code_font"])
+            self._code_fmt.setFont(f)
+        else:
+            self._code_fmt.setFontFamily("Courier New")
+        if colors.get("md_code_bg"):
+            self._code_fmt.setBackground(QColor(colors["md_code_bg"]))
+        else:
+            self._code_fmt.setBackground(QColor(60, 60, 60, 120))
+        if colors.get("md_code_fg"):
+            self._code_fmt.setForeground(QColor(colors["md_code_fg"]))
+
+        # --- Blockquote ---
+        # Preserve italic; only override foreground.
+        self._quote_fmt = QTextCharFormat()
+        self._quote_fmt.setFontItalic(True)
+        if colors.get("md_blockquote_fg"):
+            self._quote_fmt.setForeground(QColor(colors["md_blockquote_fg"]))
+        else:
+            self._quote_fmt.setForeground(QColor(150, 180, 150))
 
         self.rehighlight()
 
@@ -109,70 +163,81 @@ class TranscriptHighlighter(QSyntaxHighlighter):
                 self.setFormat(0, len(text), self._hr_fmt)
                 return
 
+        # --- List (background pass first so inline spans can merge on top) ---
         m_list = re.match(r'^(\s*)([-*+]\s+)(.*)', text)
         if m_list:
-            self.setFormat(
-                m_list.start(2),
-                len(m_list.group(2)) + len(m_list.group(3)),
-                self._list_bg_fmt
-            )
+            content_start = m_list.start(2)
+            content_len = len(m_list.group(2)) + len(m_list.group(3))
+            self.setFormat(content_start, content_len, self._list_bg_fmt)
             self.setFormat(m_list.start(2), len(m_list.group(2)), self._list_marker_fmt)
 
+        # --- Blockquote ---
         m = re.match(r'^(>+)\s*(.*)', text)
         if m:
             self.setFormat(m.start(1), m.end(1) - m.start(1), self._markup_fmt)
             self.setFormat(m.start(2), m.end(2) - m.start(2), self._quote_fmt)
 
+        # --- Bold (merge so list-background is preserved) ---
         for m in re.finditer(r'(\*\*|__)(.+?)(\1)', text):
-            self.setFormat(m.start(1), m.end(1) - m.start(1), self._markup_fmt)
-            self.setFormat(m.start(2), m.end(2) - m.start(2), self._bold_fmt)
-            self.setFormat(m.start(3), m.end(3) - m.start(3), self._markup_fmt)
+            self._merge_format(m.start(1), m.end(1) - m.start(1), self._markup_fmt)
+            self._merge_format(m.start(2), m.end(2) - m.start(2), self._bold_fmt)
+            self._merge_format(m.start(3), m.end(3) - m.start(3), self._markup_fmt)
 
+        # --- Italic * (merge) ---
         for m in re.finditer(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', text):
-            self.setFormat(m.start(), 1, self._markup_fmt)
-            self.setFormat(m.start() + 1, m.end() - m.start() - 2, self._italic_fmt)
-            self.setFormat(m.end() - 1, 1, self._markup_fmt)
+            self._merge_format(m.start(), 1, self._markup_fmt)
+            self._merge_format(m.start() + 1, m.end() - m.start() - 2, self._italic_fmt)
+            self._merge_format(m.end() - 1, 1, self._markup_fmt)
 
+        # --- Italic _ (merge) ---
         for m in re.finditer(r'(?<!_)_(?!_)(.+?)(?<!_)_(?!_)', text):
-            self.setFormat(m.start(), 1, self._markup_fmt)
-            self.setFormat(m.start() + 1, m.end() - m.start() - 2, self._italic_fmt)
-            self.setFormat(m.end() - 1, 1, self._markup_fmt)
+            self._merge_format(m.start(), 1, self._markup_fmt)
+            self._merge_format(m.start() + 1, m.end() - m.start() - 2, self._italic_fmt)
+            self._merge_format(m.end() - 1, 1, self._markup_fmt)
 
+        # --- Strikethrough (merge) ---
         for m in re.finditer(r'(~~)(.+?)(\1)', text):
-            self.setFormat(m.start(1), 2, self._markup_fmt)
-            self.setFormat(m.start(2), m.end(2) - m.start(2), self._strike_fmt)
-            self.setFormat(m.start(3), 2, self._markup_fmt)
+            self._merge_format(m.start(1), 2, self._markup_fmt)
+            self._merge_format(m.start(2), m.end(2) - m.start(2), self._strike_fmt)
+            self._merge_format(m.start(3), 2, self._markup_fmt)
 
+        # --- Inline code (merge so bold-in-code etc. also stack) ---
         for m in re.finditer(r'(`)(.+?)(\1)', text):
-            self.setFormat(m.start(1), 1, self._markup_fmt)
-            self.setFormat(m.start(2), m.end(2) - m.start(2), self._code_fmt)
-            self.setFormat(m.start(3), 1, self._markup_fmt)
+            self._merge_format(m.start(1), 1, self._markup_fmt)
+            self._merge_format(m.start(2), m.end(2) - m.start(2), self._code_fmt)
+            self._merge_format(m.start(3), 1, self._markup_fmt)
 
+        # --- Underline <u>...</u> (merge) ---
         for m in re.finditer(r'(<u>)(.+?)(</u>)', text):
-            self.setFormat(m.start(1), 3, self._markup_fmt)
-            self.setFormat(m.start(2), m.end(2) - m.start(2), self._underline_fmt)
-            self.setFormat(m.start(3), 4, self._markup_fmt)
+            self._merge_format(m.start(1), 3, self._markup_fmt)
+            self._merge_format(m.start(2), m.end(2) - m.start(2), self._underline_fmt)
+            self._merge_format(m.start(3), 4, self._markup_fmt)
 
+        # --- Markdown link [text](url) ---
         for m in re.finditer(r'(\[)(.*?)(\])(\()(.+?)(\))', text):
-            self.setFormat(m.start(1), 1, self._markup_fmt)
-            self.setFormat(m.start(2), m.end(2) - m.start(2), self._link_fmt)
-            self.setFormat(m.start(3), 2, self._markup_fmt)
-            self.setFormat(m.start(5), m.end(5) - m.start(5), self._markup_fmt)
-            self.setFormat(m.start(6), 1, self._markup_fmt)
+            self._merge_format(m.start(1), 1, self._markup_fmt)
+            self._merge_format(m.start(2), m.end(2) - m.start(2), self._link_fmt)
+            self._merge_format(m.start(3), 2, self._markup_fmt)
+            self._merge_format(m.start(5), m.end(5) - m.start(5), self._markup_fmt)
+            self._merge_format(m.start(6), 1, self._markup_fmt)
 
+        # --- Auto-link <url> / <email> ---
         for m in re.finditer(r'(<)(.+?@[^>]+|[a-zA-Z]+://[^>]+)(>)', text):
-            self.setFormat(m.start(1), 1, self._markup_fmt)
-            self.setFormat(m.start(2), m.end(2) - m.start(2), self._link_fmt)
-            self.setFormat(m.start(3), 1, self._markup_fmt)
+            self._merge_format(m.start(1), 1, self._markup_fmt)
+            self._merge_format(m.start(2), m.end(2) - m.start(2), self._link_fmt)
+            self._merge_format(m.start(3), 1, self._markup_fmt)
 
+        # --- Generic HTML tags ---
         for m in re.finditer(r'</?[a-zA-Z0-9]+[^>]*>', text):
-            self.setFormat(m.start(), m.end() - m.start(), self._markup_fmt)
+            self._merge_format(m.start(), m.end() - m.start(), self._markup_fmt)
 
+        # --- Timestamps (always on top) ---
         for m in self.ts_pattern.finditer(text):
-            self.setFormat(m.start(), m.end() - m.start(), self.ts_format)
+            self._merge_format(m.start(), m.end() - m.start(), self.ts_format)
 
+        # --- Speaker tags (always on top) ---
         for m in self.spk_pattern.finditer(text):
-            self.setFormat(m.start(), m.end() - m.start(), self.spk_format)
+            self._merge_format(m.start(), m.end() - m.start(), self.spk_format)
 
 
 class EditorMargin(QWidget):
@@ -188,7 +253,6 @@ class EditorMargin(QWidget):
 
     def mousePressEvent(self, event):
         self.editor.margin_clicked(event.pos())
-
 
 class TranscriptEditor(QPlainTextEdit):
     jump_requested = pyqtSignal(float)

@@ -425,8 +425,20 @@ class AudioPlayer(QMainWindow):
             font.fromString(font_str)
             self.editor.setFont(font)
 
+        color_keys = [
+            "ts_fg", "ts_bg", "spk_fg", "spk_bg",
+            "md_heading_fg", "md_hr_fg",
+            "md_list_bg", "md_list_marker_fg", "md_markup_fg",
+            # new colour settings
+            "md_code_bg", "md_code_fg", "md_blockquote_fg",
+        ]
+        font_keys = [
+            "ts_font", "spk_font", "md_code_font", "md_markup_font",
+        ]
         colors = {}
-        for k in ["ts_fg", "ts_bg", "spk_fg", "spk_bg", "md_heading_fg", "md_hr_fg", "md_list_bg", "md_list_marker_fg", "md_markup_fg"]:
+        for k in color_keys:
+            colors[k] = self.settings.value(f"editor_{k}", "")
+        for k in font_keys:
             colors[k] = self.settings.value(f"editor_{k}", "")
         self.editor.highlighter.update_formats(colors)
 
