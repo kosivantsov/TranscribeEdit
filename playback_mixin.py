@@ -96,7 +96,7 @@ class PlaybackMixin:
             return
         if self.player.pause:
             try:
-                self.player.command("seek", f"{self.current_pos}", "absolute")
+                self.player.command("seek", float(self.current_pos), "absolute")
             except Exception:
                 pass
             self.player.pause = False
@@ -120,7 +120,7 @@ class PlaybackMixin:
         if self.player:
             self.player.pause = True
             try:
-                self.player.command("seek", "0", "absolute")
+                self.player.command("seek", 0.0, "absolute")
             except Exception:
                 pass
             self.play_btn.setText(self.tr("▶ Play"))
@@ -130,14 +130,14 @@ class PlaybackMixin:
         if self.player:
             try:
                 new_pos = max(0, min(self.duration, self.current_pos + seconds))
-                self.player.command("seek", f"{new_pos}", "absolute")
+                self.player.command("seek", float(new_pos), "absolute")
             except Exception:
                 pass
 
     def seek_to(self, seconds):
         if self.player:
             try:
-                self.player.command("seek", f"{seconds}", "absolute")
+                self.player.command("seek", float(seconds), "absolute")
             except Exception:
                 pass
 
