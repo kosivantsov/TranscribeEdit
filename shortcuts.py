@@ -25,6 +25,7 @@ DEFAULT_SHORTCUTS = {
     "Format Bold": "Ctrl+B",
     "Format Italic": "Ctrl+I",
     "Format Underline": "Ctrl+U",
+    "Add Comment": "Ctrl+/",
     "Jump to Cursor": "F5",
     "Increase Speed": "F4",
     "Decrease Speed": "F3",
@@ -47,4 +48,7 @@ DEFAULT_SHORTCUTS = {
     "Waveform 1.0s": "3",
     "Waveform 2.0s": "4",
     "Waveform 5.0s": "5",
+    "Set/Jump/Unset A": "Ctrl+Shift+A",
+    "Set/Jump/Unset B": "Ctrl+Shift+B",
+    "Toggle Loop": "Ctrl+Shift+L",
 }

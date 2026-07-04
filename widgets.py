@@ -6,7 +6,7 @@ import tempfile
 import wave
 from PyQt5.QtWidgets import QWidget, QLabel, QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QCheckBox
 from PyQt5.QtCore import Qt, QRegExp
-from PyQt5.QtGui import QPainter, QPen, QFont, QTextDocument, QTextCursor
+from PyQt5.QtGui import QPainter, QPen, QFont, QColor, QTextDocument, QTextCursor
 
 class ColorLabel(QLabel):
     def __init__(self, text=""):
@@ -31,6 +31,8 @@ class WaveformWidget(QWidget):
         self.sample_rate = None
         self.duration = 0
         self.callback_seek = None
+        self.marker_a = None
+        self.marker_b = None
         self.setMinimumHeight(80)
 
     def load_audio_ffmpeg(self, path, ffmpeg_bin="ffmpeg"):
@@ -42,8 +44,8 @@ class WaveformWidget(QWidget):
                 except Exception: pass
 
             cmd = [
-                ffmpeg_bin, "-y", "-i", path, 
-                "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", 
+                ffmpeg_bin, "-y", "-i", path,
+                "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le",
                 temp_wav
             ]
             # Will raise FileNotFoundError if ffmpeg_bin is invalid
@@ -53,9 +55,9 @@ class WaveformWidget(QWidget):
                 sr = wf.getframerate()
                 n_frames = wf.getnframes()
                 audio_bytes = wf.readframes(n_frames)
-                
-                data_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
-                data = data_int16.astype(np.float32) / 32768.0
+
+            data_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
+            data = data_int16.astype(np.float32) / 32768.0
 
             self.set_audio(data, sr)
             return len(data) / sr
@@ -64,7 +66,7 @@ class WaveformWidget(QWidget):
             print(f"Error generating waveform: {e}")
             self.set_audio(None, None)
             raise e
-            
+
         finally:
             if temp_wav and os.path.exists(temp_wav):
                 try: os.remove(temp_wav)
@@ -75,23 +77,25 @@ class WaveformWidget(QWidget):
         if self.active:
             self.sample_rate = sr
             self.duration = len(data) / sr
-            
+
             bars_per_sec = 200
             samples_per_bar = max(1, int(sr / bars_per_sec))
             total_bars = len(data) // samples_per_bar
-            
+
             if total_bars > 0:
                 truncated = data[:total_bars * samples_per_bar]
                 reshaped = truncated.reshape((total_bars, samples_per_bar))
                 self.bars = np.max(np.abs(reshaped), axis=1)
             else:
                 self.bars = np.array([])
-                
-            self.window_len = bars_per_sec 
+
+            self.window_len = bars_per_sec
         else:
             self.bars = None
             self.window_len = 1
             self.duration = 0
+        self.marker_a = None
+        self.marker_b = None
         self.update()
 
     def set_window(self, start_frame, window_frames):
@@ -106,29 +110,62 @@ class WaveformWidget(QWidget):
         self.position = frame_idx
         self.update()
 
+    def set_markers(self, a_seconds, b_seconds):
+        self.marker_a = a_seconds
+        self.marker_b = b_seconds
+        self.update()
+
+    def _frame_to_x(self, frame, w):
+        x = int((frame - self.window_start) * w / self.window_len)
+        return x
+
     def paintEvent(self, event):
         if not self.active or self.bars is None or self.window_len < 1:
             painter = QPainter(self)
             painter.fillRect(0, 0, self.width(), self.height(), Qt.black)
             painter.end()
             return
-            
+
         painter = QPainter(self)
         w, h = self.width(), self.height()
         center = h // 2
-        
+
         data = self.bars[self.window_start:self.window_start + self.window_len]
         max_val = data.max() if data.size else 1.0
         if max_val == 0.0: max_val = 1.0
-            
+
         painter.fillRect(0, 0, w, h, Qt.black)
         painter.setPen(QPen(Qt.cyan))
-        
+
         for i, val in enumerate(data):
             x = int(i * w / self.window_len)
             y = int((val / max_val) * (h / 2.8))
             painter.drawLine(x, center - y, x, center + y)
-            
+
+        # --- A/B loop markers (orange bars with letter labels) ---
+        marker_font = QFont("Courier New")
+        marker_font.setBold(True)
+        marker_font.setPointSize(9)
+        painter.setFont(marker_font)
+
+        if self.marker_a is not None:
+            frame_a = self.marker_a * 200.0
+            x_a = self._frame_to_x(frame_a, w)
+            if 0 <= x_a <= w:
+                painter.setPen(QPen(QColor(255, 165, 0), 2))
+                painter.drawLine(x_a, 0, x_a, h)
+                painter.setPen(QPen(QColor(255, 165, 0)))
+                painter.drawText(x_a + 2, 12, "A")
+
+        if self.marker_b is not None:
+            frame_b = self.marker_b * 200.0
+            x_b = self._frame_to_x(frame_b, w)
+            if 0 <= x_b <= w:
+                painter.setPen(QPen(QColor(255, 140, 0), 2))
+                painter.drawLine(x_b, 0, x_b, h)
+                painter.setPen(QPen(QColor(255, 140, 0)))
+                painter.drawText(x_b + 2, 12, "B")
+
         cursor_x = int((self.position - self.window_start) * w / self.window_len)
         cursor_x = max(0, min(cursor_x, w))
         painter.setPen(QPen(Qt.red, 2))
@@ -174,7 +211,7 @@ class FindDialog(QDialog):
 
         from PyQt5.QtGui import QTextDocument
         from PyQt5.QtCore import QRegularExpression
-        
+
         options = QTextDocument.FindFlags()
         if backward: options |= QTextDocument.FindBackward
 
@@ -186,7 +223,7 @@ class FindDialog(QDialog):
             cursor.movePosition(QTextCursor.End if backward else QTextCursor.Start)
             self.editor.setTextCursor(cursor)
             found = self.editor.find(query, options)
-            
+
         if found:
             self.editor.highlight_find_result()
         else:
@@ -200,23 +237,23 @@ class JumpDialog(QWidget):
         self.setWindowModality(Qt.ApplicationModal)
         self.resize(450, 180)
         layout = QVBoxLayout(self)
-        
+
         from PyQt5.QtWidgets import QSlider
         from utils import seconds_to_ts
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setRange(0, int(duration * 10))
         self.slider.setValue(int(current_pos * 10))
         layout.addWidget(self.slider)
-        
+
         self.pos_label = ColorLabel(f"{seconds_to_ts(current_pos)} / {seconds_to_ts(duration)}")
         layout.addWidget(self.pos_label)
-        
+
         btn_layout = QHBoxLayout()
         ok = QPushButton(self.tr("OK")); ok.clicked.connect(lambda: [callback(self.slider.value() / 10), self.close()])
         cl = QPushButton(self.tr("Cancel")); cl.clicked.connect(self.close)
         btn_layout.addWidget(ok); btn_layout.addWidget(cl)
         layout.addLayout(btn_layout)
-        
+
         self.slider.valueChanged.connect(lambda v: self.pos_label.setText(f"{seconds_to_ts(v/10)} / {seconds_to_ts(duration)}"))
 
     def keyPressEvent(self, event):

@@ -9,6 +9,9 @@ from PyQt5.QtCore import pyqtSignal, Qt, QRect, QSize
 
 from utils import TIMESTAMP_RE, ts_to_seconds, seconds_to_ts
 
+COMMENT_OPEN_RE = re.compile(r'<!--')
+COMMENT_CLOSE_RE = re.compile(r'-->')
+
 
 class TranscriptHighlighter(QSyntaxHighlighter):
     def __init__(self, document):
@@ -53,6 +56,11 @@ class TranscriptHighlighter(QSyntaxHighlighter):
 
         self._list_bg_fmt = QTextCharFormat()
         self._list_marker_fmt = QTextCharFormat()
+
+        # --- Comments ---
+        self._comment_fmt = QTextCharFormat()
+        self._comment_fmt.setForeground(QColor(110, 140, 90))
+        self._comment_fmt.setFontItalic(True)
 
         self.ts_pattern = TIMESTAMP_RE
         self.spk_pattern = re.compile(r'⟪[^⟫]+⟫')
@@ -139,7 +147,67 @@ class TranscriptHighlighter(QSyntaxHighlighter):
         else:
             self._quote_fmt.setForeground(QColor(150, 180, 150))
 
+        # --- Comments ---
+        self._comment_fmt = QTextCharFormat()
+        if colors.get("comment_font"):
+            f = QFont()
+            f.fromString(colors["comment_font"])
+            self._comment_fmt.setFont(f)
+        else:
+            self._comment_fmt.setFontItalic(True)
+        if colors.get("comment_fg"):
+            self._comment_fmt.setForeground(QColor(colors["comment_fg"]))
+        else:
+            self._comment_fmt.setForeground(QColor(110, 140, 90))
+        if colors.get("comment_bg"):
+            self._comment_fmt.setBackground(QColor(colors["comment_bg"]))
+
         self.rehighlight()
+
+    # ------------------------------------------------------------------
+    # Comment scanning (multi-block). Block state:
+    #   -1 = not in comment (default / reset)
+    #    1 = inside an open (unterminated) comment
+    # A comment sequence is invalidated (not colored) if it spans an
+    # empty line - handled by resetting state to -1 on empty blocks.
+    # ------------------------------------------------------------------
+    def _highlight_comments(self, text):
+        in_comment = self.previousBlockState() == 1
+
+        # An empty line always breaks/cancels any in-progress comment.
+        if text.strip() == "":
+            self.setCurrentBlockState(-1)
+            return in_comment  # doesn't matter, block had no content anyway
+
+        pos = 0
+        length = len(text)
+        while pos < length:
+            if not in_comment:
+                m = COMMENT_OPEN_RE.search(text, pos)
+                if not m:
+                    break
+                start = m.start()
+                m_close = COMMENT_CLOSE_RE.search(text, m.end())
+                if m_close:
+                    end = m_close.end()
+                    self.setFormat(start, end - start, self._comment_fmt)
+                    pos = end
+                else:
+                    self.setFormat(start, length - start, self._comment_fmt)
+                    in_comment = True
+                    pos = length
+            else:
+                m_close = COMMENT_CLOSE_RE.search(text, pos)
+                if m_close:
+                    end = m_close.end()
+                    self.setFormat(0, end, self._comment_fmt)
+                    in_comment = False
+                    pos = end
+                else:
+                    self.setFormat(0, length, self._comment_fmt)
+                    pos = length
+
+        self.setCurrentBlockState(1 if in_comment else -1)
 
     def highlightBlock(self, text):
         block = self.currentBlock()
@@ -155,12 +223,14 @@ class TranscriptHighlighter(QSyntaxHighlighter):
 
         if is_heading:
             self.setFormat(0, len(text), self._heading_fmt)
+            self.setCurrentBlockState(-1)
             return
 
         if re.fullmatch(r'(\*{3,}|-{3,}|_{3,})', text_stripped):
             prev_block = block.previous()
             if not prev_block.isValid() or not prev_block.text().strip():
                 self.setFormat(0, len(text), self._hr_fmt)
+                self.setCurrentBlockState(-1)
                 return
 
         # --- List (background pass first so inline spans can merge on top) ---
@@ -183,31 +253,30 @@ class TranscriptHighlighter(QSyntaxHighlighter):
             self._merge_format(m.start(2), m.end(2) - m.start(2), self._bold_fmt)
             self._merge_format(m.start(3), m.end(3) - m.start(3), self._markup_fmt)
 
-        # --- Italic * (merge) ---
+        # --- Italic * or _ (merge) ---
         for m in re.finditer(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', text):
             self._merge_format(m.start(), 1, self._markup_fmt)
-            self._merge_format(m.start() + 1, m.end() - m.start() - 2, self._italic_fmt)
+            self._merge_format(m.start(1), m.end(1) - m.start(1), self._italic_fmt)
             self._merge_format(m.end() - 1, 1, self._markup_fmt)
 
-        # --- Italic _ (merge) ---
         for m in re.finditer(r'(?<!_)_(?!_)(.+?)(?<!_)_(?!_)', text):
             self._merge_format(m.start(), 1, self._markup_fmt)
-            self._merge_format(m.start() + 1, m.end() - m.start() - 2, self._italic_fmt)
+            self._merge_format(m.start(1), m.end(1) - m.start(1), self._italic_fmt)
             self._merge_format(m.end() - 1, 1, self._markup_fmt)
 
-        # --- Strikethrough (merge) ---
-        for m in re.finditer(r'(~~)(.+?)(\1)', text):
+        # --- Strikethrough ~~..~~ (merge) ---
+        for m in re.finditer(r'(~~)(.+?)(~~)', text):
             self._merge_format(m.start(1), 2, self._markup_fmt)
             self._merge_format(m.start(2), m.end(2) - m.start(2), self._strike_fmt)
             self._merge_format(m.start(3), 2, self._markup_fmt)
 
-        # --- Inline code (merge so bold-in-code etc. also stack) ---
-        for m in re.finditer(r'(`)(.+?)(\1)', text):
+        # --- Inline code `..` (merge) ---
+        for m in re.finditer(r'(`)(.+?)(`)', text):
             self._merge_format(m.start(1), 1, self._markup_fmt)
             self._merge_format(m.start(2), m.end(2) - m.start(2), self._code_fmt)
             self._merge_format(m.start(3), 1, self._markup_fmt)
 
-        # --- Underline <u>...</u> (merge) ---
+        # --- Underline <u>..</u> (merge) ---
         for m in re.finditer(r'(<u>)(.+?)(</u>)', text):
             self._merge_format(m.start(1), 3, self._markup_fmt)
             self._merge_format(m.start(2), m.end(2) - m.start(2), self._underline_fmt)
@@ -239,6 +308,9 @@ class TranscriptHighlighter(QSyntaxHighlighter):
         for m in self.spk_pattern.finditer(text):
             self._merge_format(m.start(), m.end() - m.start(), self.spk_format)
 
+        # --- Comments (always drawn last, on top of everything) ---
+        self._highlight_comments(text)
+
 
 class EditorMargin(QWidget):
     def __init__(self, editor):
@@ -254,6 +326,7 @@ class EditorMargin(QWidget):
     def mousePressEvent(self, event):
         self.editor.margin_clicked(event.pos())
 
+
 class TranscriptEditor(QPlainTextEdit):
     jump_requested = pyqtSignal(float)
 
@@ -262,6 +335,7 @@ class TranscriptEditor(QPlainTextEdit):
     SPEAKER_ONLY_RE = re.compile(r'^\s*⟪[^⟫]+⟫\s*$')
     TS_ONLY_RE = re.compile(r'^\s*⟦(\d+:\d{2}:\d{2}\.\d{2,3})⟧(?:\s*⟦(\d+:\d{2}:\d{2}\.\d{2,3})⟧)?\s*$')
     SPEAKER_RE = re.compile(r'^⟪([^⟫]+)⟫\s*(.*)$')
+    COMMENT_LINE_RE = re.compile(r'<!--(.*?)-->', re.DOTALL)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -278,7 +352,6 @@ class TranscriptEditor(QPlainTextEdit):
                 "Markdown supported."
             )
         )
-
         self.highlighter = TranscriptHighlighter(self.document())
         self.margin = EditorMargin(self)
         self.blockCountChanged.connect(self.update_margin_width)
@@ -320,6 +393,8 @@ class TranscriptEditor(QPlainTextEdit):
             tag_close = tag_open
 
         cursor = self.textCursor()
+        original_caret_pos = cursor.position()
+
         if not cursor.hasSelection():
             cursor.select(QTextCursor.WordUnderCursor)
 
@@ -331,47 +406,112 @@ class TranscriptEditor(QPlainTextEdit):
         pos = cursor.position()
         anchor = cursor.anchor()
         start, end = min(pos, anchor), max(pos, anchor)
+        caret_pos = original_caret_pos
 
-        cursor.beginEditBlock()
+        tracker = QTextCursor(self.document())
+        tracker.setPosition(caret_pos)
+
+        edit_cursor = QTextCursor(self.document())
+        edit_cursor.beginEditBlock()
 
         if text.startswith(tag_open) and text.endswith(tag_close) and len(text) >= len_o + len_c:
-            cursor.insertText(text[len_o:-len_c])
-            new_start = start
-            new_pos = new_start + (pos - start) - (len_o if pos > start else 0)
-            new_anchor = new_start + (anchor - start) - (len_o if anchor > start else 0)
-        else:
-            cursor.setPosition(start)
-            cursor.movePosition(QTextCursor.Left, QTextCursor.KeepAnchor, len_o)
-            left_text = cursor.selectedText()
+            edit_cursor.setPosition(end - len_c)
+            edit_cursor.setPosition(end, QTextCursor.KeepAnchor)
+            edit_cursor.removeSelectedText()
 
-            cursor.setPosition(end)
-            cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, len_c)
-            right_text = cursor.selectedText()
+            edit_cursor.setPosition(start)
+            edit_cursor.setPosition(start + len_o, QTextCursor.KeepAnchor)
+            edit_cursor.removeSelectedText()
+        else:
+            edit_cursor.setPosition(start)
+            edit_cursor.movePosition(QTextCursor.Left, QTextCursor.KeepAnchor, len_o)
+            left_text = edit_cursor.selectedText()
+
+            edit_cursor.setPosition(end)
+            edit_cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, len_c)
+            right_text = edit_cursor.selectedText()
 
             if left_text == tag_open and right_text == tag_close:
-                cursor.setPosition(start - len_o)
-                cursor.setPosition(end + len_c, QTextCursor.KeepAnchor)
-                cursor.insertText(text)
-                new_pos = pos - len_o
-                new_anchor = anchor - len_o
-            else:
-                cursor.setPosition(start)
-                cursor.setPosition(end, QTextCursor.KeepAnchor)
-                cursor.insertText(f"{tag_open}{text}{tag_close}")
-                new_pos = pos + len_o if pos > start else pos
-                new_anchor = anchor + len_o if anchor > start else anchor
+                edit_cursor.setPosition(end)
+                edit_cursor.setPosition(end + len_c, QTextCursor.KeepAnchor)
+                edit_cursor.removeSelectedText()
 
-        rc = self.textCursor()
-        rc.setPosition(new_anchor)
-        rc.setPosition(new_pos, QTextCursor.KeepAnchor)
-        self.setTextCursor(rc)
-        cursor.endEditBlock()
+                edit_cursor.setPosition(start - len_o)
+                edit_cursor.setPosition(start, QTextCursor.KeepAnchor)
+                edit_cursor.removeSelectedText()
+            else:
+                edit_cursor.setPosition(end)
+                edit_cursor.insertText(tag_close)
+
+                edit_cursor.setPosition(start)
+                edit_cursor.insertText(tag_open)
+
+        edit_cursor.endEditBlock()
+
+        tracker.clearSelection()
+        self.setTextCursor(tracker)
+        self.ensureCursorVisible()
 
     def format_bold(self):
         self.toggle_format("**")
 
     def format_italic(self):
         self.toggle_format("_")
+
+    def add_comment(self):
+        cursor = self.textCursor()
+        if cursor.hasSelection():
+            start = min(cursor.position(), cursor.anchor())
+            end = max(cursor.position(), cursor.anchor())
+        else:
+            block = cursor.block()
+            start = block.position()
+            end = start + len(block.text())
+
+        caret_pos = cursor.position()
+        doc_text = self.toPlainText()
+
+        # Check whether [start, end) already sits inside an existing,
+        # properly-closed comment - possibly spanning several lines.
+        enclosing_open = -1
+        enclosing_close = -1
+        open_idx = doc_text.rfind("<!--", 0, end)
+        if open_idx != -1:
+            close_idx = doc_text.find("-->", open_idx + 4)
+            if close_idx != -1 and close_idx + 3 >= end and open_idx <= start:
+                # Make sure no earlier "-->" closes the comment before our range starts.
+                interrupting_close = doc_text.find("-->", open_idx + 4, start)
+                if interrupting_close == -1:
+                    enclosing_open = open_idx
+                    enclosing_close = close_idx
+
+        tracker = QTextCursor(self.document())
+        tracker.setPosition(caret_pos)
+
+        edit_cursor = QTextCursor(self.document())
+        edit_cursor.beginEditBlock()
+
+        if enclosing_open != -1:
+            # Remove the enclosing markers wherever they are (higher offset first).
+            edit_cursor.setPosition(enclosing_close)
+            edit_cursor.setPosition(enclosing_close + 3, QTextCursor.KeepAnchor)
+            edit_cursor.removeSelectedText()
+
+            edit_cursor.setPosition(enclosing_open)
+            edit_cursor.setPosition(enclosing_open + 4, QTextCursor.KeepAnchor)
+            edit_cursor.removeSelectedText()
+        else:
+            edit_cursor.setPosition(end)
+            edit_cursor.insertText("-->")
+
+            edit_cursor.setPosition(start)
+            edit_cursor.insertText("<!--")
+
+        edit_cursor.endEditBlock()
+
+        tracker.clearSelection()
+        self.setTextCursor(tracker)
+        self.ensureCursorVisible()
 
     def highlight_find_result(self):
         cursor = self.textCursor()
@@ -513,7 +653,6 @@ class TranscriptEditor(QPlainTextEdit):
                 ts_to_seconds(f"{m.group(1)}:{m.group(2)}:{m.group(3)}.{m.group(4)}") - current_seconds
             )
         )
-
         temp_cursor = QTextCursor(self.document())
         temp_cursor.setPosition(closest_match.start())
         temp_cursor.select(QTextCursor.LineUnderCursor)
@@ -666,10 +805,10 @@ class TranscriptEditor(QPlainTextEdit):
     def _warn_identical_timestamp(self, inserted_sec, existing_sec, parent_widget=None):
         if parent_widget is None:
             return False
-    
+
         inserted_ts = seconds_to_ts(inserted_sec)
         existing_ts = seconds_to_ts(existing_sec)
-    
+
         answer = QMessageBox.question(
             parent_widget,
             self.tr("Duplicate timestamp"),
@@ -685,16 +824,16 @@ class TranscriptEditor(QPlainTextEdit):
         cursor = self.textCursor()
         pos = cursor.position()
         prev_sec, next_sec = self._find_neighbors_around_pos(pos)
-    
+
         if prev_sec is not None and abs(prev_sec - seconds) < 1e-6:
             return self._warn_identical_timestamp(seconds, prev_sec, parent_widget)
-    
+
         if next_sec is not None and abs(next_sec - seconds) < 1e-6:
             return self._warn_identical_timestamp(seconds, next_sec, parent_widget)
-    
+
         if prev_sec is not None and prev_sec > seconds + 1e-6:
             return self._warn_timestamp_order(seconds, prev_sec, parent_widget)
-    
+
         return True
 
     # ---------- structural insertion ----------
@@ -794,12 +933,58 @@ class TranscriptEditor(QPlainTextEdit):
             if speaker:
                 lines.append(f"⟪{speaker}⟫")
             lines.append(text)
+            comment = seg.get('comment', '')
+            if comment:
+                lines.append(f"<!--{comment}-->")
             lines.append("")
 
         self.setPlainText('\n'.join(lines))
         self.document().setModified(False)
 
+    # ------------------------------------------------------------------
+    # Comment extraction: scans raw text for <!-- ... --> blocks that do
+    # NOT contain a blank line inside them. Returns a list of
+    # (start_pos, end_pos, comment_text) tuples, in document order.
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _extract_valid_comments(full_text):
+        comments = []
+        pos = 0
+        length = len(full_text)
+        while True:
+            start = full_text.find("<!--", pos)
+            if start == -1:
+                break
+            end_marker = full_text.find("-->", start + 4)
+            if end_marker == -1:
+                break
+            end = end_marker + 3
+            inner = full_text[start + 4:end_marker]
+            # Reject if inner contains a blank line
+            if re.search(r'\n[ \t]*\n', inner):
+                pos = start + 4
+                continue
+            comments.append((start, end, inner.strip()))
+            pos = end
+        return comments
+
     def to_segments(self):
+        full_text = self.toPlainText()
+        comments = self._extract_valid_comments(full_text)
+
+        # Build a char-position -> comment lookup, and strip comments
+        # from the text used for segment/line parsing (replaced with
+        # blank spans of the same line-count to preserve line numbers).
+        comment_map = {}  # line_index -> comment text (first line of the comment)
+        working_chars = list(full_text)
+        for start, end, comment_text in comments:
+            line_index = full_text.count("\n", 0, start)
+            comment_map[line_index] = comment_text
+            for i in range(start, end):
+                if working_chars[i] != "\n":
+                    working_chars[i] = " "
+        working_text = "".join(working_chars)
+
         segments = []
         current_seg = None
 
@@ -807,12 +992,23 @@ class TranscriptEditor(QPlainTextEdit):
             nonlocal current_seg
             if current_seg:
                 current_seg['text'] = current_seg['text'].strip()
-                if current_seg['text'] or 'start' in current_seg:
+                if current_seg['text'] or 'start' in current_seg or current_seg.get('comment'):
                     segments.append(current_seg)
-            current_seg = None
+                current_seg = None
 
-        for line in self.toPlainText().splitlines():
+        lines = working_text.splitlines()
+        for idx, line in enumerate(lines):
             line_stripped = line.strip()
+
+            if idx in comment_map:
+                if current_seg is None:
+                    current_seg = {'text': ''}
+                current_seg['comment'] = (
+                    (current_seg.get('comment', '') + "\n" + comment_map[idx]).strip()
+                    if current_seg.get('comment') else comment_map[idx]
+                )
+                if not line_stripped:
+                    continue
 
             if not line_stripped:
                 _flush()

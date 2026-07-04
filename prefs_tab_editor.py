@@ -15,19 +15,22 @@ DEFAULT_COLORS = {
     "md_list_bg": "#2a2a2a",
     "md_list_marker_fg": "#00ff00",
     "md_markup_fg": "#787878",
-    # new color settings
     "md_code_bg": "",
     "md_code_fg": "",
     "md_blockquote_fg": "",
+    # Comment colours
+    "comment_fg": "#888888",
+    "comment_bg": "#1a1a2e",
 }
 
 # Font settings stored separately (serialised QFont strings).
 DEFAULT_FONTS = {
-    "font": "",          # general editor font
-    "ts_font": "",       # timestamp font
-    "spk_font": "",      # speaker tag font
-    "md_code_font": "",  # inline-code font
-    "md_markup_font": "", # MD markup-symbol font
+    "font": "",
+    "ts_font": "",
+    "spk_font": "",
+    "md_code_font": "",
+    "md_markup_font": "",
+    "comment_font": "",
 }
 
 
@@ -38,9 +41,7 @@ class EditorTab(QWidget):
         super().__init__(parent)
         self.settings = settings
 
-        # Load colour config
         self.config = {k: settings.value(f"editor_{k}", v) for k, v in DEFAULT_COLORS.items()}
-        # Load font config
         for k, v in DEFAULT_FONTS.items():
             self.config[k] = settings.value(f"editor_{k}", v)
 
@@ -71,6 +72,8 @@ class EditorTab(QWidget):
             ("md_code_bg",        self.tr("MD Code Background")),
             ("md_code_fg",        self.tr("MD Code Foreground")),
             ("md_blockquote_fg",  self.tr("MD Blockquote Foreground")),
+            ("comment_fg",        self.tr("Comment Foreground")),
+            ("comment_bg",        self.tr("Comment Background")),
         ]
 
         self.color_btns = {}
@@ -88,13 +91,13 @@ class EditorTab(QWidget):
 
         layout.addLayout(grid)
 
-        # ---- Font pickers ----
         font_labels = [
-            ("font",          self.tr("Editor Font:")),
-            ("ts_font",       self.tr("Timestamp Font:")),
-            ("spk_font",      self.tr("Speaker Tag Font:")),
-            ("md_code_font",  self.tr("MD Code Font:")),
+            ("font",           self.tr("Editor Font:")),
+            ("ts_font",        self.tr("Timestamp Font:")),
+            ("spk_font",       self.tr("Speaker Tag Font:")),
+            ("md_code_font",   self.tr("MD Code Font:")),
             ("md_markup_font", self.tr("MD Markup Symbol Font:")),
+            ("comment_font",   self.tr("Comment Font:")),
         ]
 
         self.font_btns = {}

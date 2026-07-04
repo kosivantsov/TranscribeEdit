@@ -71,6 +71,11 @@ class AudioPlayer(QMainWindow):
         self.is_playing = False
         self.on_top_flag = False
 
+        self.loop_a = None
+        self.loop_b = None
+        self.loop_on = False
+        self.was_paused_before_loop_seek = False
+
         self.current_json_path = None
         self.current_project_path = None
         self.active_qshortcuts = []
@@ -87,6 +92,13 @@ class AudioPlayer(QMainWindow):
         self.timer.start(50)
 
         self.update_status_bar()
+
+        self.loop_a = None
+        self.loop_b = None
+        self.loop_on = False
+        self.was_paused_before_loop_seek = False
+        self._loop_seek_pending = False
+        self._loop_seek_target = None
 
     def show_deps_dialog(self):
         dlg = DepsDialog(self, self.settings, missing_only=True)
@@ -132,7 +144,10 @@ class AudioPlayer(QMainWindow):
         tv.addWidget(self.waveform)
 
         controls_layout = QHBoxLayout()
-        controls_layout.setSpacing(30)
+        controls_layout.setSpacing(14)
+
+        BTN_H = 32
+        LBL_H = 20
 
         seek_frame = QFrame()
         seek_layout = QVBoxLayout(seek_frame)
@@ -140,10 +155,12 @@ class AudioPlayer(QMainWindow):
         seek_layout.setSpacing(6)
         lbl_seek = QLabel(self.tr("Seek"))
         lbl_seek.setAlignment(Qt.AlignCenter)
+        lbl_seek.setFixedHeight(LBL_H)
         seek_layout.addWidget(lbl_seek)
 
         seek_grid = QGridLayout()
         seek_grid.setContentsMargins(0,0,0,0)
+        seek_grid.setSpacing(4)
         seek_data = [
             ("-0.1s", -0.1), ("-0.5s", -0.5), ("+0.5s", +0.5), ("+0.1s", +0.1),
             ("-1s", -1.0), ("-5s", -5.0), ("+5s", +5.0), ("+1s", +1.0)
@@ -151,10 +168,12 @@ class AudioPlayer(QMainWindow):
         self.seek_btns = []
         for i, (lbl_txt, val) in enumerate(seek_data):
             btn = QPushButton(lbl_txt)
+            btn.setFixedHeight(BTN_H)
             seek_grid.addWidget(btn, i // 4, i % 4)
             self.seek_btns.append((btn, val))
         seek_layout.addLayout(seek_grid)
-        controls_layout.addWidget(seek_frame, 1)
+        seek_layout.addStretch()
+        controls_layout.addWidget(seek_frame, 35)
 
         pb_frame = QFrame()
         pb_layout = QVBoxLayout(pb_frame)
@@ -162,30 +181,64 @@ class AudioPlayer(QMainWindow):
         pb_layout.setSpacing(6)
         lbl_pb = QLabel(self.tr("Playback/Speed"))
         lbl_pb.setAlignment(Qt.AlignCenter)
+        lbl_pb.setFixedHeight(LBL_H)
         pb_layout.addWidget(lbl_pb)
 
         btn_row = QHBoxLayout()
         btn_row.setContentsMargins(0,0,0,0)
+        btn_row.setSpacing(4)
         self.stop_btn = QPushButton(self.tr("■ Stop"))
         self.play_btn = QPushButton(self.tr("▶ Play"))
         self.jump_btn = QPushButton(self.tr("Jump…"))
+        for b in (self.stop_btn, self.play_btn, self.jump_btn):
+            b.setFixedHeight(BTN_H)
         btn_row.addWidget(self.stop_btn); btn_row.addWidget(self.play_btn); btn_row.addWidget(self.jump_btn)
         pb_layout.addLayout(btn_row)
 
         spd_row = QHBoxLayout()
         spd_row.setContentsMargins(0,0,0,0)
+        spd_row.setSpacing(4)
         self.speed_btns = []
         for sp in [0.25, 0.5, 0.75, 1.0]:
             btn = QPushButton(f"{int(sp*100)}%")
             btn.setCheckable(True)
+            btn.setFixedHeight(BTN_H)
             self.speed_btns.append((btn, sp))
             spd_row.addWidget(btn)
         self.speed_btns[-1][0].setChecked(True)
         self.speed_minus = QPushButton("-")
         self.speed_plus = QPushButton("+")
+        self.speed_minus.setFixedHeight(BTN_H)
+        self.speed_plus.setFixedHeight(BTN_H)
         spd_row.addWidget(self.speed_minus); spd_row.addWidget(self.speed_plus)
         pb_layout.addLayout(spd_row)
-        controls_layout.addWidget(pb_frame, 1)
+        pb_layout.addStretch()
+        controls_layout.addWidget(pb_frame, 40)
+
+        loop_frame = QFrame()
+        loop_layout = QVBoxLayout(loop_frame)
+        loop_layout.setContentsMargins(0,0,0,0)
+        loop_layout.setSpacing(6)
+        lbl_loop = QLabel(self.tr("Loop"))
+        lbl_loop.setAlignment(Qt.AlignCenter)
+        lbl_loop.setFixedHeight(LBL_H)
+        loop_layout.addWidget(lbl_loop)
+
+        loop_row = QHBoxLayout()
+        loop_row.setContentsMargins(0,0,0,0)
+        loop_row.setSpacing(4)
+        self.mark_a_btn = QPushButton(self.tr("A"))
+        self.mark_b_btn = QPushButton(self.tr("B"))
+        self.loop_btn = QPushButton(self.tr("Loop"))
+        self.loop_btn.setCheckable(True)
+        for b in (self.mark_a_btn, self.mark_b_btn, self.loop_btn):
+            b.setFixedHeight(BTN_H)
+        loop_row.addWidget(self.mark_a_btn)
+        loop_row.addWidget(self.mark_b_btn)
+        loop_row.addWidget(self.loop_btn)
+        loop_layout.addLayout(loop_row)
+        loop_layout.addStretch()
+        controls_layout.addWidget(loop_frame, 25)
 
         tv.addLayout(controls_layout)
 
@@ -266,6 +319,10 @@ class AudioPlayer(QMainWindow):
         for btn, val in self.speed_btns:
             btn.clicked.connect(lambda checked, v=val: self.set_speed(v))
 
+        self.mark_a_btn.clicked.connect(self.toggle_mark_a)
+        self.mark_b_btn.clicked.connect(self.toggle_mark_b)
+        self.loop_btn.toggled.connect(self.set_loop_on)
+
         self.editor.jump_requested.connect(self.seek_to)
         self.editor.document().modificationChanged.connect(self.update_status_bar)
 
@@ -314,6 +371,7 @@ class AudioPlayer(QMainWindow):
             "Format Bold": self.editor.format_bold,
             "Format Italic": self.editor.format_italic,
             "Format Underline": lambda: self.editor.toggle_format("<u>", "</u>"),
+            "Add Comment": self.editor.add_comment,
             "Jump to Cursor": self.editor.jump_to_timestamp_at_cursor,
             "Increase Speed": self.increase_speed,
             "Decrease Speed": self.decrease_speed,
@@ -336,6 +394,9 @@ class AudioPlayer(QMainWindow):
             "Waveform 1.0s": lambda: self.set_window_size(1.0),
             "Waveform 2.0s": lambda: self.set_window_size(2.0),
             "Waveform 5.0s": lambda: self.set_window_size(5.0),
+            "Set/Jump/Unset A": self.toggle_mark_a,
+            "Set/Jump/Unset B": self.toggle_mark_b,
+            "Toggle Loop": self.loop_btn.toggle,
         }
         self.current_shortcuts = {}
         for name, default_seq in DEFAULT_SHORTCUTS.items():
@@ -431,9 +492,11 @@ class AudioPlayer(QMainWindow):
             "md_list_bg", "md_list_marker_fg", "md_markup_fg",
             # new colour settings
             "md_code_bg", "md_code_fg", "md_blockquote_fg",
+            "comment_fg", "comment_bg",
         ]
         font_keys = [
             "ts_font", "spk_font", "md_code_font", "md_markup_font",
+            "comment_font",
         ]
         colors = {}
         for k in color_keys:
@@ -553,6 +616,12 @@ class AudioPlayer(QMainWindow):
         self.audio_file = path
         self.file_label.setText(os.path.basename(path))
 
+        self.loop_a = None
+        self.loop_b = None
+        self.loop_btn.setChecked(False)
+        self.loop_on = False
+        self._update_loop_markers()
+
         try:
             ffmpeg_path = get_dep_path(self.settings, 'dep_ffmpeg')
             if not ffmpeg_path: ffmpeg_path = "ffmpeg"
@@ -579,8 +648,11 @@ class AudioPlayer(QMainWindow):
             try: self.player.command("seek", f"{self.current_pos}", "absolute")
             except Exception: pass
             self.player.pause = False; self.play_btn.setText(self.tr("⏸ Pause"))
+            self.is_playing = True
+            self._apply_loop_resume_check()
         else:
             self.player.pause = True; self.play_btn.setText(self.tr("▶ Play"))
+            self.is_playing = False
 
     def stop_play(self):
         if not self.player: return
@@ -593,6 +665,7 @@ class AudioPlayer(QMainWindow):
             try: self.player.command("seek", "0", "absolute")
             except Exception: pass
             self.play_btn.setText(self.tr("▶ Play"))
+            self.is_playing = False
 
     def seek_rel(self, seconds):
         if self.player:
@@ -820,6 +893,73 @@ class AudioPlayer(QMainWindow):
             self._handy_progress.close()
         QMessageBox.critical(self, self.tr("Handy Tool Error"), msg)
 
+    # --- A/B LOOP LOGIC ---
+    POS_EPSILON = 0.05
+
+    def toggle_mark_a(self):
+        pos = self.current_pos
+        if self.loop_a is not None and abs(self.loop_a - pos) < self.POS_EPSILON:
+            self.loop_a = None
+        elif self.loop_a is None:
+            if self.loop_b is not None and abs(self.loop_b - pos) < self.POS_EPSILON:
+                self.loop_b = None
+            self.loop_a = pos
+        else:
+            self.seek_to(self.loop_a)
+        self._update_loop_markers()
+
+    def toggle_mark_b(self):
+        pos = self.current_pos
+        if self.loop_b is not None and abs(self.loop_b - pos) < self.POS_EPSILON:
+            self.loop_b = None
+        elif self.loop_b is None:
+            if self.loop_a is not None and abs(self.loop_a - pos) < self.POS_EPSILON:
+                self.loop_a = None
+            self.loop_b = pos
+        else:
+            self.seek_to(self.loop_b)
+        self._update_loop_markers()
+
+    def _update_loop_markers(self):
+        if getattr(self, "waveform", None):
+            self.waveform.set_markers(self.loop_a, self.loop_b)
+
+    def set_loop_on(self, checked):
+        self.loop_on = checked
+        if checked:
+            self._apply_loop_resume_check()
+
+    LOOP_SEEK_GUARD_TIMEOUT_MS = 400
+
+    def _apply_loop_resume_check(self):
+        if not self.loop_on:
+            return
+        pos = self.current_pos
+        if self.loop_b is not None and pos >= self.loop_b - 1e-3:
+            self._perform_loop_seek(self.loop_a if self.loop_a is not None else 0)
+        elif self.loop_a is not None and pos < self.loop_a - 1e-3:
+            self._perform_loop_seek(self.loop_a)
+
+    def _apply_loop_playback_tick(self):
+        if not self.loop_on or not self.is_playing:
+            return
+        if getattr(self, "_loop_seek_pending", False):
+            return
+        pos = self.current_pos
+        if self.loop_b is not None and pos >= self.loop_b - 1e-3:
+            self._perform_loop_seek(self.loop_a if self.loop_a is not None else 0)
+        elif self.loop_a is not None and pos < self.loop_a - 1e-3:
+            self._perform_loop_seek(self.loop_a)
+
+    def _perform_loop_seek(self, target):
+        self._loop_seek_pending = True
+        self._loop_seek_target = target
+        self.seek_to(target)
+        QTimer.singleShot(self.LOOP_SEEK_GUARD_TIMEOUT_MS, self._clear_loop_seek_guard)
+
+    def _clear_loop_seek_guard(self):
+        self._loop_seek_pending = False
+
     def update_ui(self):
         if not self.player: return
         try: pos = float(self.player.time_pos or 0)
@@ -827,6 +967,13 @@ class AudioPlayer(QMainWindow):
         
         self.current_pos = max(0, min(self.duration, pos))
         self.time_label.setText(f"{seconds_to_ts(self.current_pos)} / {seconds_to_ts(self.duration)}")
+
+        if getattr(self, "_loop_seek_pending", False):
+            target = getattr(self, "_loop_seek_target", None)
+            if target is not None and abs(self.current_pos - target) < 0.15:
+                self._loop_seek_pending = False
+
+        self._apply_loop_playback_tick()
         
         if getattr(self, "waveform", None) and self.waveform.bars is not None:
             tb = len(self.waveform.bars)
