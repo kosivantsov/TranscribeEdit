@@ -612,7 +612,25 @@ class TranscriptEditor(QPlainTextEdit):
 
     def marginPaintEvent(self, event):
         painter = QPainter(self.margin)
-        painter.fillRect(event.rect(), QColor(35, 35, 35))
+        
+        # 1. Get base window color
+        base_bg = self.palette().window().color()
+        
+        # 2. Adjust brightness depending on the current theme mode
+        # lightness() returns 0 (black) to 255 (white)
+        if base_bg.lightness() < 128:
+            # Dark theme: make it ~30% lighter
+            bg_color = base_bg.lighter(130)
+        else:
+            # Light theme: make it ~30% darker
+            bg_color = base_bg.darker(130)
+            
+        painter.fillRect(event.rect(), bg_color)
+        
+        # Get dynamic text and button colors for the folding icons
+        text_color = self.palette().windowText().color()
+        btn_color = self.palette().button().color()
+        
         block = self.firstVisibleBlock()
         top = int(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
         bottom = top + int(self.blockBoundingRect(block).height())
@@ -625,10 +643,16 @@ class TranscriptEditor(QPlainTextEdit):
                     box_s = 10
                     bx = (self.margin.width() - box_s) // 2
                     by = top + (line_h - box_s) // 2
-                    painter.setPen(QPen(QColor(150, 150, 150)))
-                    painter.setBrush(QColor(60, 60, 60))
+                    
+                    # Draw folding box using dynamic palette colors
+                    painter.setPen(QPen(text_color))
+                    painter.setBrush(btn_color)
                     painter.drawRect(bx, by, box_s, box_s)
+                    
+                    # Draw minus (horizontal line)
                     painter.drawLine(bx + 2, by + box_s // 2, bx + box_s - 2, by + box_s // 2)
+                    
+                    # Draw plus (vertical line) if folded
                     if is_folded:
                         painter.drawLine(bx + box_s // 2, by + 2, bx + box_s // 2, by + box_s - 2)
             block = block.next()

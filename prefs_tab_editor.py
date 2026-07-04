@@ -1,37 +1,51 @@
-# prefs_tab_editor.py
+"""prefs_tab_editor.py — Editor appearance tab in Preferences.
+
+Changes from base commit
+------------------------
+* Color buttons show "Default" (plain, uncolored) when the stored value is
+  SENTINEL; only custom values paint the button background.
+* Font buttons always render with the standard UI font showing name/size as
+  plain text; the actual chosen font is applied to the editor via ThemeManager.
+* All reads/writes go through theme_<key> QSettings keys via ThemeManager.
+* "Default" button resets the key to SENTINEL.
+"""
+
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QGridLayout, QHBoxLayout,
-    QLabel, QPushButton, QColorDialog, QFontDialog
+    QLabel, QPushButton, QColorDialog, QFontDialog,
 )
 from PyQt5.QtGui import QColor, QFont
 from PyQt5.QtCore import Qt
 
-DEFAULT_COLORS = {
-    "text_fg": "", "text_bg": "",
-    "ts_fg": "", "ts_bg": "",
-    "spk_fg": "", "spk_bg": "",
-    "md_heading_fg": "#ffaa00",
-    "md_hr_fg": "#888888",
-    "md_list_bg": "#2a2a2a",
-    "md_list_marker_fg": "#00ff00",
-    "md_markup_fg": "#787878",
-    "md_code_bg": "",
-    "md_code_fg": "",
-    "md_blockquote_fg": "",
-    # Comment colours
-    "comment_fg": "#888888",
-    "comment_bg": "#1a1a2e",
-}
+from theme_manager import SENTINEL
 
-# Font settings stored separately (serialised QFont strings).
-DEFAULT_FONTS = {
-    "font": "",
-    "ts_font": "",
-    "spk_font": "",
-    "md_code_font": "",
-    "md_markup_font": "",
-    "comment_font": "",
-}
+COLOR_LABELS = [
+    ("text_fg",           "General Text Foreground"),
+    ("text_bg",           "General Text Background"),
+    ("ts_fg",             "Timestamp Foreground"),
+    ("ts_bg",             "Timestamp Background"),
+    ("spk_fg",            "Speaker Tag Foreground"),
+    ("spk_bg",            "Speaker Tag Background"),
+    ("md_heading_fg",     "MD Heading Foreground"),
+    ("md_hr_fg",          "MD Horizontal Rule"),
+    ("md_list_bg",        "MD List Background"),
+    ("md_list_marker_fg", "MD List Marker"),
+    ("md_markup_fg",      "MD Markup Symbols Foreground"),
+    ("md_code_bg",        "MD Code Background"),
+    ("md_code_fg",        "MD Code Foreground"),
+    ("md_blockquote_fg",  "MD Blockquote Foreground"),
+    ("comment_fg",        "Comment Foreground"),
+    ("comment_bg",        "Comment Background"),
+]
+
+FONT_LABELS = [
+    ("font",           "Editor Font:"),
+    ("ts_font",        "Timestamp Font:"),
+    ("spk_font",       "Speaker Tag Font:"),
+    ("md_code_font",   "MD Code Font:"),
+    ("md_markup_font", "MD Markup Symbol Font:"),
+    ("comment_font",   "Comment Font:"),
+]
 
 
 class EditorTab(QWidget):
@@ -41,10 +55,19 @@ class EditorTab(QWidget):
         super().__init__(parent)
         self.settings = settings
 
-        self.config = {k: settings.value(f"editor_{k}", v) for k, v in DEFAULT_COLORS.items()}
-        for k, v in DEFAULT_FONTS.items():
-            self.config[k] = settings.value(f"editor_{k}", v)
+        from theme_manager import ThemeManager
+        self._tm = ThemeManager(settings)
 
+        # Working copy: key -> stored value (may be SENTINEL)
+        self._stored = {}
+        for key, _ in COLOR_LABELS:
+            self._stored[key] = settings.value(f"theme_{key}", SENTINEL)
+        for key, _ in FONT_LABELS:
+            self._stored[key] = settings.value(f"theme_{key}", SENTINEL)
+
+        self._build_ui()
+
+    def _build_ui(self):
         layout = QVBoxLayout(self)
 
         info = QLabel(self.tr(
@@ -56,113 +79,82 @@ class EditorTab(QWidget):
         layout.addWidget(info)
 
         grid = QGridLayout()
-
-        color_labels = [
-            ("text_fg",           self.tr("General Text Foreground")),
-            ("text_bg",           self.tr("General Text Background")),
-            ("ts_fg",             self.tr("Timestamp Foreground")),
-            ("ts_bg",             self.tr("Timestamp Background")),
-            ("spk_fg",            self.tr("Speaker Tag Foreground")),
-            ("spk_bg",            self.tr("Speaker Tag Background")),
-            ("md_heading_fg",     self.tr("MD Heading Foreground")),
-            ("md_hr_fg",          self.tr("MD Horizontal Rule")),
-            ("md_list_bg",        self.tr("MD List Background")),
-            ("md_list_marker_fg", self.tr("MD List Marker")),
-            ("md_markup_fg",      self.tr("MD Markup Symbols Foreground")),
-            ("md_code_bg",        self.tr("MD Code Background")),
-            ("md_code_fg",        self.tr("MD Code Foreground")),
-            ("md_blockquote_fg",  self.tr("MD Blockquote Foreground")),
-            ("comment_fg",        self.tr("Comment Foreground")),
-            ("comment_bg",        self.tr("Comment Background")),
-        ]
-
         self.color_btns = {}
-        for i, (key, label) in enumerate(color_labels):
-            grid.addWidget(QLabel(label), i, 0)
+        for i, (key, label) in enumerate(COLOR_LABELS):
+            grid.addWidget(QLabel(self.tr(label)), i, 0)
             btn = QPushButton()
-            self._update_btn_color(btn, self.config.get(key, ""))
+            self._refresh_color_btn(btn, key)
             btn.clicked.connect(lambda checked, k=key, b=btn: self._pick_color(k, b))
             grid.addWidget(btn, i, 1)
 
-            clear_btn = QPushButton(self.tr("Clear / Default"))
-            clear_btn.clicked.connect(lambda checked, k=key, b=btn: self._clear_color(k, b))
+            clear_btn = QPushButton(self.tr("Reset"))
+            clear_btn.clicked.connect(lambda checked, k=key, b=btn: self._reset_color(k, b))
             grid.addWidget(clear_btn, i, 2)
             self.color_btns[key] = btn
-
         layout.addLayout(grid)
 
-        font_labels = [
-            ("font",           self.tr("Editor Font:")),
-            ("ts_font",        self.tr("Timestamp Font:")),
-            ("spk_font",       self.tr("Speaker Tag Font:")),
-            ("md_code_font",   self.tr("MD Code Font:")),
-            ("md_markup_font", self.tr("MD Markup Symbol Font:")),
-            ("comment_font",   self.tr("Comment Font:")),
-        ]
-
         self.font_btns = {}
-        for fkey, flabel in font_labels:
+        for fkey, flabel in FONT_LABELS:
             row = QHBoxLayout()
-            row.addWidget(QLabel(flabel))
-            btn = QPushButton(self.tr("Select Font..."))
-            self._update_font_btn(btn, self.config.get(fkey, ""))
+            row.addWidget(QLabel(self.tr(flabel)))
+            btn = QPushButton()
+            self._refresh_font_btn(btn, fkey)
             btn.clicked.connect(lambda checked, k=fkey, b=btn: self._pick_font(k, b))
             row.addWidget(btn)
-            clear_f = QPushButton(self.tr("Clear / Default"))
-            clear_f.clicked.connect(lambda checked, k=fkey, b=btn: self._clear_font(k, b))
+            clear_f = QPushButton(self.tr("Reset"))
+            clear_f.clicked.connect(lambda checked, k=fkey, b=btn: self._reset_font(k, b))
             row.addWidget(clear_f)
             layout.addLayout(row)
             self.font_btns[fkey] = btn
 
         layout.addStretch()
 
-    # ------------------------------------------------------------------ helpers
-
-    def _update_btn_color(self, btn, color_str):
-        if color_str:
-            btn.setStyleSheet(f"background-color: {color_str};")
-            btn.setText("")
-        else:
+    # ------------------------------------------------------------------
+    def _refresh_color_btn(self, btn, key):
+        stored = self._stored.get(key, SENTINEL)
+        if stored == SENTINEL or stored == "" or stored is None:
             btn.setStyleSheet("")
-            btn.setText(self.tr("Unset"))
+            btn.setText(self.tr("Default Value"))
+        else:
+            btn.setStyleSheet(f"background-color: {stored};")
+            btn.setText("")
 
-    def _clear_color(self, key, btn):
-        self.config[key] = DEFAULT_COLORS.get(key, "")
-        self._update_btn_color(btn, self.config[key])
+    def _reset_color(self, key, btn):
+        self._stored[key] = SENTINEL
+        self._refresh_color_btn(btn, key)
 
     def _pick_color(self, key, btn):
-        initial = QColor(self.config.get(key, "#ffffff")) if self.config.get(key) else Qt.white
+        stored = self._stored.get(key, SENTINEL)
+        initial = QColor(stored) if stored and stored != SENTINEL else QColor(self._tm.resolve(key) or "#ffffff")
         color = QColorDialog.getColor(initial, self, self.tr("Select Color"))
         if color.isValid():
-            hex_color = color.name()
-            self.config[key] = hex_color
-            self._update_btn_color(btn, hex_color)
+            self._stored[key] = color.name()
+            self._refresh_color_btn(btn, key)
 
-    def _update_font_btn(self, btn, font_str):
-        if font_str:
-            f = QFont()
-            f.fromString(font_str)
-            btn.setText(f"{f.family()}, {f.pointSize()}pt")
-            btn.setFont(f)
+    def _refresh_font_btn(self, btn, key):
+        stored = self._stored.get(key, SENTINEL)
+        btn.setFont(QFont())  # always standard UI font on the button itself
+        if stored == SENTINEL or stored == "" or stored is None:
+            btn.setText(self.tr("Default Value"))
         else:
-            btn.setText(self.tr("Select Font..."))
-            btn.setFont(QFont())
+            f = QFont()
+            f.fromString(stored)
+            btn.setText(f"{f.family()}, {f.pointSize()}pt")
 
-    def _clear_font(self, key, btn):
-        self.config[key] = DEFAULT_FONTS.get(key, "")
-        self._update_font_btn(btn, self.config[key])
+    def _reset_font(self, key, btn):
+        self._stored[key] = SENTINEL
+        self._refresh_font_btn(btn, key)
 
     def _pick_font(self, key, btn):
-        font = QFont()
-        if self.config.get(key):
-            font.fromString(self.config[key])
-        font, ok = QFontDialog.getFont(font, self, self.tr("Select Font"))
+        stored = self._stored.get(key, SENTINEL)
+        f = QFont()
+        if stored and stored != SENTINEL:
+            f.fromString(stored)
+        font, ok = QFontDialog.getFont(f, self, self.tr("Select Font"))
         if ok:
-            self.config[key] = font.toString()
-            self._update_font_btn(btn, self.config[key])
-
-    # ------------------------------------------------------------------ save
+            self._stored[key] = font.toString()
+            self._refresh_font_btn(btn, key)
 
     def save(self):
-        for k, v in self.config.items():
-            self.settings.setValue(f"editor_{k}", v)
+        for key, stored in self._stored.items():
+            self.settings.setValue(f"theme_{key}", stored if stored is not None else SENTINEL)

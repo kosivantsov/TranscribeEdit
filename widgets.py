@@ -1,4 +1,3 @@
-# widgets.py
 import numpy as np
 import os
 import subprocess
@@ -8,7 +7,10 @@ from PyQt5.QtWidgets import QWidget, QLabel, QDialog, QVBoxLayout, QHBoxLayout, 
 from PyQt5.QtCore import Qt, QRegExp
 from PyQt5.QtGui import QPainter, QPen, QFont, QColor, QTextDocument, QTextCursor
 
+
 class ColorLabel(QLabel):
+    """Timetable display widget — colours/font driven by ThemeManager."""
+
     def __init__(self, text=""):
         super().__init__(text)
         self.setAlignment(Qt.AlignCenter)
@@ -18,7 +20,29 @@ class ColorLabel(QLabel):
         font.setBold(True)
         self.setFont(font)
         self.setMinimumHeight(44)
+        # Dark-mode defaults (matches base commit)
         self.setStyleSheet("background-color: black; color: cyan;")
+
+    def apply_theme_colors(self, fg: str, bg: str, font_str: str = ""):
+        """Called by ThemeManager to update colours and optional font."""
+        parts = []
+        if bg:
+            parts.append(f"background-color: {bg};")
+        if fg:
+            parts.append(f"color: {fg};")
+        self.setStyleSheet(" ".join(parts) if parts else "")
+
+        if font_str:
+            f = QFont()
+            f.fromString(font_str)
+            self.setFont(f)
+        else:
+            f = QFont("Courier")
+            f.setStyleHint(QFont.TypeWriter)
+            f.setPointSize(20)
+            f.setBold(True)
+            self.setFont(f)
+
 
 class WaveformWidget(QWidget):
     def __init__(self, parent=None):
@@ -34,6 +58,17 @@ class WaveformWidget(QWidget):
         self.marker_a = None
         self.marker_b = None
         self.setMinimumHeight(80)
+        # Colour slots — set by ThemeManager via set_colors()
+        self._fg_color = QColor("#00ffff")  # cyan default (dark)
+        self._bg_color = QColor("#000000")  # black default (dark)
+
+    def set_colors(self, fg: str, bg: str):
+        """Update waveform rendering colours and trigger repaint."""
+        if fg:
+            self._fg_color = QColor(fg)
+        if bg:
+            self._bg_color = QColor(bg)
+        self.update()
 
     def load_audio_ffmpeg(self, path, ffmpeg_bin="ffmpeg"):
         temp_wav = None
@@ -48,7 +83,6 @@ class WaveformWidget(QWidget):
                 "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le",
                 temp_wav
             ]
-            # Will raise FileNotFoundError if ffmpeg_bin is invalid
             subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
             with wave.open(temp_wav, 'rb') as wf:
@@ -77,18 +111,15 @@ class WaveformWidget(QWidget):
         if self.active:
             self.sample_rate = sr
             self.duration = len(data) / sr
-
             bars_per_sec = 200
             samples_per_bar = max(1, int(sr / bars_per_sec))
             total_bars = len(data) // samples_per_bar
-
             if total_bars > 0:
                 truncated = data[:total_bars * samples_per_bar]
                 reshaped = truncated.reshape((total_bars, samples_per_bar))
                 self.bars = np.max(np.abs(reshaped), axis=1)
             else:
                 self.bars = np.array([])
-
             self.window_len = bars_per_sec
         else:
             self.bars = None
@@ -116,13 +147,12 @@ class WaveformWidget(QWidget):
         self.update()
 
     def _frame_to_x(self, frame, w):
-        x = int((frame - self.window_start) * w / self.window_len)
-        return x
+        return int((frame - self.window_start) * w / self.window_len)
 
     def paintEvent(self, event):
         if not self.active or self.bars is None or self.window_len < 1:
             painter = QPainter(self)
-            painter.fillRect(0, 0, self.width(), self.height(), Qt.black)
+            painter.fillRect(0, 0, self.width(), self.height(), self._bg_color)
             painter.end()
             return
 
@@ -134,15 +164,14 @@ class WaveformWidget(QWidget):
         max_val = data.max() if data.size else 1.0
         if max_val == 0.0: max_val = 1.0
 
-        painter.fillRect(0, 0, w, h, Qt.black)
-        painter.setPen(QPen(Qt.cyan))
+        painter.fillRect(0, 0, w, h, self._bg_color)
+        painter.setPen(QPen(self._fg_color))
 
         for i, val in enumerate(data):
             x = int(i * w / self.window_len)
             y = int((val / max_val) * (h / 2.8))
             painter.drawLine(x, center - y, x, center + y)
 
-        # --- A/B loop markers (orange bars with letter labels) ---
         marker_font = QFont("Courier New")
         marker_font.setBold(True)
         marker_font.setPointSize(9)
@@ -178,6 +207,7 @@ class WaveformWidget(QWidget):
         frame = int(self.window_start + x * self.window_len / self.width())
         self.callback_seek(frame / 200.0)
 
+
 class FindDialog(QDialog):
     def __init__(self, parent, editor):
         super().__init__(parent)
@@ -196,7 +226,6 @@ class FindDialog(QDialog):
         btn_layout = QHBoxLayout()
         self.find_prev_btn = QPushButton(self.tr("Find Previous"))
         self.find_next_btn = QPushButton(self.tr("Find Next"))
-
         btn_layout.addWidget(self.find_prev_btn)
         btn_layout.addWidget(self.find_next_btn)
         layout.addLayout(btn_layout)
@@ -208,30 +237,30 @@ class FindDialog(QDialog):
     def _do_find(self, backward):
         text = self.search_input.text()
         if not text: return
-
         from PyQt5.QtGui import QTextDocument
         from PyQt5.QtCore import QRegularExpression
-
         options = QTextDocument.FindFlags()
         if backward: options |= QTextDocument.FindBackward
-
         query = QRegularExpression(text) if self.regex_cb.isChecked() else text
-
         found = self.editor.find(query, options)
         if not found:
             cursor = self.editor.textCursor()
             cursor.movePosition(QTextCursor.End if backward else QTextCursor.Start)
             self.editor.setTextCursor(cursor)
             found = self.editor.find(query, options)
-
         if found:
             self.editor.highlight_find_result()
         else:
             self.editor.find_extra_selections = []
             self.editor._apply_all_extra_selections()
 
+
 class JumpDialog(QWidget):
-    def __init__(self, parent, duration, current_pos, callback):
+    def __init__(self, parent, duration, current_pos, callback, timetable_theme_fn=None):
+        """
+        timetable_theme_fn: optional callable(ColorLabel) that applies
+        the current timetable theme colours/font to the label inside this dialog.
+        """
         super().__init__(parent, Qt.Window | Qt.WindowStaysOnTopHint)
         self.setWindowTitle(self.tr("Jump To Position"))
         self.setWindowModality(Qt.ApplicationModal)
@@ -246,19 +275,34 @@ class JumpDialog(QWidget):
         layout.addWidget(self.slider)
 
         self.pos_label = ColorLabel(f"{seconds_to_ts(current_pos)} / {seconds_to_ts(duration)}")
+        
+        # FIX: Try the callback first, but fall back to checking the parent's theme manager!
+        if timetable_theme_fn is not None:
+            timetable_theme_fn(self.pos_label)
+        elif hasattr(parent, "theme_mgr"):
+            fg = parent.theme_mgr.resolve("timetable_fg")
+            bg = parent.theme_mgr.resolve("timetable_bg")
+            font_str = parent.theme_mgr.resolve("timetable_font")
+            self.pos_label.apply_theme_colors(fg, bg, font_str)
+            
         layout.addWidget(self.pos_label)
 
         btn_layout = QHBoxLayout()
-        ok = QPushButton(self.tr("OK")); ok.clicked.connect(lambda: [callback(self.slider.value() / 10), self.close()])
-        cl = QPushButton(self.tr("Cancel")); cl.clicked.connect(self.close)
-        btn_layout.addWidget(ok); btn_layout.addWidget(cl)
+        ok = QPushButton(self.tr("OK"))
+        ok.clicked.connect(lambda: [callback(self.slider.value() / 10), self.close()])
+        cl = QPushButton(self.tr("Cancel"))
+        cl.clicked.connect(self.close)
+        btn_layout.addWidget(ok)
+        btn_layout.addWidget(cl)
         layout.addLayout(btn_layout)
 
-        self.slider.valueChanged.connect(lambda v: self.pos_label.setText(f"{seconds_to_ts(v/10)} / {seconds_to_ts(duration)}"))
+        self.slider.valueChanged.connect(
+            lambda v: self.pos_label.setText(f"{seconds_to_ts(v/10)} / {seconds_to_ts(duration)}")
+        )
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Left: self.slider.setValue(max(0, self.slider.value() - 1))
         elif event.key() == Qt.Key_Right: self.slider.setValue(min(self.slider.maximum(), self.slider.value() + 1))
-        elif event.key() in (Qt.Key_Enter, Qt.Key_Return): self.on_ok()
+        elif event.key() in (Qt.Key_Enter, Qt.Key_Return): pass
         elif event.key() == Qt.Key_Escape: self.close()
         else: super().keyPressEvent(event)

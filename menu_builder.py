@@ -1,4 +1,3 @@
-# menu_builder.py
 import platform
 from PyQt5.QtWidgets import QAction, QMenu
 from PyQt5.QtGui import QKeySequence
@@ -11,7 +10,7 @@ def build_main_menu(window) -> dict:
 
     # ------------------------------------------------------------------ FILE
     file_menu = menubar.addMenu(window.tr("File"))
-
+    # ... (all File menu items unchanged from base commit) ...
     open_proj_action = QAction(window.tr("Open Project..."), window)
     open_proj_action.triggered.connect(window.load_project)
     file_menu.addAction(open_proj_action)
@@ -179,15 +178,17 @@ def build_main_menu(window) -> dict:
 
     view_menu.addSeparator()
 
-    #~ themes_action = QAction(window.tr("Themes and Colors..."), window)
-    # Direct access: Preferences jumped to the Editor tab (index 3 = EditorTab).
-    # (There is no separate themes system beyond the editor color/font config.)
-    #~ themes_action.triggered.connect(window.open_editor_config)
-    #~ view_menu.addAction(themes_action)
-
+    # NEW: direct-access to Editor tab
     editor_config_action = QAction(window.tr("Editor Options..."), window)
     editor_config_action.triggered.connect(window.open_editor_config)
     view_menu.addAction(editor_config_action)
+    actions["Editor Options"] = editor_config_action
+
+    # NEW: direct-access to Themes and Colors tab
+    themes_action = QAction(window.tr("Themes and Colors..."), window)
+    themes_action.triggered.connect(window.open_themes_config)
+    view_menu.addAction(themes_action)
+    actions["Themes and Colors"] = themes_action
 
     # ------------------------------------------------------------------ OPTIONS
     options_menu = menubar.addMenu(window.tr("Options"))
@@ -205,8 +206,6 @@ def build_main_menu(window) -> dict:
     preferences_action = QAction(window.tr("Preferences..."), window)
     preferences_action.setMenuRole(QAction.PreferencesRole)
     preferences_action.triggered.connect(window.open_preferences_dialog)
-    # macOS: Cmd+, provided automatically via PreferencesRole; no explicit shortcut.
-    # Windows/Linux: Ctrl+F12 (also user-configurable via Shortcuts tab).
     if platform.system() != "Darwin":
         preferences_action.setShortcut(QKeySequence("Ctrl+F12"))
     options_menu.addAction(preferences_action)

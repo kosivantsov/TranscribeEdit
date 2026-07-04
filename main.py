@@ -25,6 +25,8 @@ from playback_mixin import PlaybackMixin
 from io_mixin import IOMixin
 from dialogs_mixin import DialogsMixin
 
+from theme_manager import ThemeManager
+
 if platform.system() == "Linux" and "QT_QPA_PLATFORMTHEME" not in os.environ:
     os.environ["QT_QPA_PLATFORMTHEME"] = "qt5ct"
 os.environ["QT_LOGGING_RULES"] = "qt.qpa.fonts=false"
@@ -57,6 +59,8 @@ class AudioPlayer(PlaybackMixin, IOMixin, DialogsMixin, QMainWindow):
 
         self.settings = QSettings("TranscribeEdit", "TranscribeEdit")
 
+        self.theme_mgr = ThemeManager(self.settings)
+
         missing_deps = check_and_store_deps(self.settings)
         if missing_deps:
             QTimer.singleShot(0, self.show_deps_dialog)
@@ -75,8 +79,17 @@ class AudioPlayer(PlaybackMixin, IOMixin, DialogsMixin, QMainWindow):
         self._build_ui()
         self.menu_actions = build_main_menu(self)
 
+        # Wire up the UI widgets to the theme manager now that they exist
+        self.theme_mgr.register_targets(
+            editor=self.editor,
+            waveform=self.waveform,
+            timetable=self.time_label,
+        )
+
         self._connect_signals()
         self._setup_shortcuts()
+        
+        # This function (from DialogsMixin) will now successfully apply the theme
         self.apply_editor_config()
 
         self.timer = QTimer()
