@@ -48,9 +48,9 @@ DEFAULT_SHORTCUTS = {
     "Waveform 1.0s":       "Ctrl+3",
     "Waveform 2.0s":       "Ctrl+4",
     "Waveform 5.0s":       "Ctrl+5",
-    "Set/Jump/Unset A":    "Ctrl+Shift+A",
-    "Set/Jump/Unset B":    "Ctrl+Shift+B",
-    "Toggle Loop":         "Ctrl+Shift+L",
+    "Set/Jump/Unset A":    "Ctrl+Alt+A",
+    "Set/Jump/Unset B":    "Ctrl+Alt+B",
+    "Toggle Loop":         "Ctrl+Alt+L",
 }
 
 # On Windows/Linux only, Preferences has a configurable shortcut.
