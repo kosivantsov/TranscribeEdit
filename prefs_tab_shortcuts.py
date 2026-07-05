@@ -1,11 +1,20 @@
 # prefs_tab_shortcuts.py
 import platform
+
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem,
-    QHeaderView, QKeySequenceEdit, QLabel,
+    QWidget, QVBoxLayout, QGridLayout, QLabel,
+    QPushButton, QKeySequenceEdit, QScrollArea,
 )
+from PyQt5.QtGui import QKeySequence
 from PyQt5.QtCore import Qt
+
 from shortcuts import DEFAULT_SHORTCUTS
+
+
+ACTION_COL_MIN_WIDTH = 220
+EDIT_COL_MIN_WIDTH = 200
+BUTTON_WIDTH = 70
+BUTTON_HEIGHT = 24
 
 
 class ShortcutsTab(QWidget):
@@ -17,46 +26,76 @@ class ShortcutsTab(QWidget):
         self.current_shortcuts = current_shortcuts
         self.edits = {}
 
-        # On macOS, "Preferences" uses the native Cmd+, role and must not
-        # appear in the configurable shortcuts table.
         is_macos = platform.system() == "Darwin"
         visible_shortcuts = {
             k: v for k, v in DEFAULT_SHORTCUTS.items()
             if not (is_macos and k == "Preferences")
         }
+        self.visible_shortcuts = visible_shortcuts
 
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
 
         info = QLabel(self.tr(
             "Configure keyboard shortcuts for the application. "
-            "Click a shortcut cell and press the new key combination to rebind it."
+            "Click a shortcut field and press the new key combination to rebind it."
         ))
         info.setWordWrap(True)
         info.setStyleSheet("margin-bottom: 10px;")
-        layout.addWidget(info)
+        outer.addWidget(info)
 
-        self.table = QTableWidget(len(visible_shortcuts), 2)
-        self.table.setHorizontalHeaderLabels([self.tr("Action"), self.tr("Shortcut")])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setSelectionMode(QTableWidget.NoSelection)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(scroll.NoFrame)
+        outer.addWidget(scroll)
 
-        for i, (name, default_seq) in enumerate(visible_shortcuts.items()):
-            item = QTableWidgetItem(name)
-            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-            self.table.setItem(i, 0, item)
+        content = QWidget()
+        scroll.setWidget(content)
+
+        layout = QVBoxLayout(content)
+
+        grid = QGridLayout()
+        grid.setColumnMinimumWidth(0, ACTION_COL_MIN_WIDTH)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnMinimumWidth(1, EDIT_COL_MIN_WIDTH)
+
+        row = 0
+        for name, default_seq in visible_shortcuts.items():
+            label = QLabel(self.tr(name))
+            grid.addWidget(label, row, 0)
 
             edit = QKeySequenceEdit()
+            edit.setMinimumWidth(EDIT_COL_MIN_WIDTH)
             seq_str = self.current_shortcuts.get(name, default_seq)
             if seq_str:
-                from PyQt5.QtGui import QKeySequence
                 edit.setKeySequence(QKeySequence(seq_str))
-
             self.edits[name] = edit
-            self.table.setCellWidget(i, 1, edit)
+            grid.addWidget(edit, row, 1)
 
-        layout.addWidget(self.table)
+            clear_btn = QPushButton(self.tr("Clear"))
+            clear_btn.setFixedSize(BUTTON_WIDTH, BUTTON_HEIGHT)
+            clear_btn.setAutoDefault(False)
+            clear_btn.setDefault(False)
+            clear_btn.clicked.connect(lambda checked, n=name: self._clear_shortcut(n))
+            grid.addWidget(clear_btn, row, 2)
+
+            reset_btn = QPushButton(self.tr("Reset"))
+            reset_btn.setFixedSize(BUTTON_WIDTH, BUTTON_HEIGHT)
+            reset_btn.setAutoDefault(False)
+            reset_btn.setDefault(False)
+            reset_btn.clicked.connect(lambda checked, n=name: self._reset_shortcut(n))
+            grid.addWidget(reset_btn, row, 3)
+
+            row += 1
+
+        layout.addLayout(grid)
+        layout.addStretch()
+
+    def _clear_shortcut(self, name):
+        self.edits[name].setKeySequence(QKeySequence())
+
+    def _reset_shortcut(self, name):
+        default_seq = DEFAULT_SHORTCUTS.get(name, "")
+        self.edits[name].setKeySequence(QKeySequence(default_seq))
 
     def save(self):
         for name, edit in self.edits.items():
