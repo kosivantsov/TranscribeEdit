@@ -10,17 +10,19 @@ Changes from base commit
 * "Default" button resets the key to SENTINEL.
 * All color/font pick and reset buttons share a fixed height AND fixed width
   (via setFixedSize, not just stylesheet min-height/min-width) so macOS Aqua
-  rendering never collapses or varies row heights/widths when a
-  background-color stylesheet is applied to a sibling button, and long font
-  names don't stretch their button wider than the others.
+  rendering never collapses or varies row heights/widths.
 * Font rows are now laid out in their own QGridLayout (mirroring the color
-  grid) so pick/reset buttons align in straight columns regardless of each
-  row's label text length.
+  grid) so pick/reset buttons align in straight columns.
+* A QScrollArea wraps all content so the tab is scrollable if content
+  exceeds the initial dialog height.
+* Added "Validate timestamp insertion" checkbox saved under
+  editor/validate_timestamps QSettings key.
 """
 
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QGridLayout, QHBoxLayout,
+    QWidget, QVBoxLayout, QGridLayout,
     QLabel, QPushButton, QColorDialog, QFontDialog,
+    QCheckBox, QScrollArea,
 )
 from PyQt5.QtGui import QColor, QFont, QFontMetrics
 from PyQt5.QtCore import Qt
@@ -55,17 +57,12 @@ FONT_LABELS = [
     ("comment_font",   "Comment Font:"),
 ]
 
-# Fixed pixel dimensions shared by every pick/reset button in this tab.
-# Using setFixedSize (not just a stylesheet min-/max-width) guarantees
-# identical, stable geometry on macOS regardless of whether a sibling
-# button has a background-color stylesheet applied, and regardless of
-# how long the displayed font name/size text is.
-PICK_BTN_WIDTH = 110
-PICK_BTN_HEIGHT = 24
-RESET_BTN_WIDTH = 70
+PICK_BTN_WIDTH   = 110
+PICK_BTN_HEIGHT  = 24
+RESET_BTN_WIDTH  = 70
 RESET_BTN_HEIGHT = 24
 
-BTN_BASE_STYLE = "padding: 2px 6px;"
+BTN_BASE_STYLE   = "padding: 2px 6px;"
 RESET_BASE_STYLE = "padding: 2px 6px;"
 
 
@@ -79,7 +76,6 @@ class EditorTab(QWidget):
         from theme_manager import ThemeManager
         self._tm = ThemeManager(settings)
 
-        # Working copy: key -> stored value (may be SENTINEL)
         self._stored = {}
         for key, _ in COLOR_LABELS:
             self._stored[key] = settings.value(f"theme_{key}", SENTINEL)
@@ -88,14 +84,20 @@ class EditorTab(QWidget):
 
         self._build_ui()
 
-    def _max_font_label_width(self):
-        fm = QFontMetrics(self.font())
-        all_labels = [label for _, label in FONT_LABELS] + [label for _, label in COLOR_LABELS]
-        return max(fm.horizontalAdvance(label) for label in all_labels) + 10
-
     def _build_ui(self):
-        layout = QVBoxLayout(self)
-    
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        outer_layout.addWidget(scroll)
+
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        scroll.setWidget(container)
+
         info = QLabel(self.tr(
             "Customize the visual appearance of the editor, "
             "including fonts and syntax highlighting colors."
@@ -103,7 +105,27 @@ class EditorTab(QWidget):
         info.setWordWrap(True)
         info.setStyleSheet("margin-bottom: 10px;")
         layout.addWidget(info)
-    
+
+        # ---- Behaviour section ----
+        behaviour_heading = QLabel(self.tr("<b>Behaviour</b>"))
+        layout.addWidget(behaviour_heading)
+
+        self.validate_ts_cb = QCheckBox(
+            self.tr("Validate timestamp insertion (warn on duplicate / out-of-order timestamps)")
+        )
+        self.validate_ts_cb.setChecked(
+            self.settings.value("editor/validate_timestamps", True, type=bool)
+        )
+        layout.addWidget(self.validate_ts_cb)
+
+        spacer = QLabel()
+        spacer.setFixedHeight(10)
+        layout.addWidget(spacer)
+
+        # ---- Colours & Fonts section ----
+        appearance_heading = QLabel(self.tr("<b>Colours &amp; Fonts</b>"))
+        layout.addWidget(appearance_heading)
+
         grid = QGridLayout()
         row = 0
         self.color_btns = {}
@@ -114,7 +136,7 @@ class EditorTab(QWidget):
             self._refresh_color_btn(btn, key)
             btn.clicked.connect(lambda checked, k=key, b=btn: self._pick_color(k, b))
             grid.addWidget(btn, row, 2)
-    
+
             clear_btn = QPushButton(self.tr("Reset"))
             clear_btn.setFixedSize(RESET_BTN_WIDTH, RESET_BTN_HEIGHT)
             clear_btn.setStyleSheet(RESET_BASE_STYLE)
@@ -122,7 +144,7 @@ class EditorTab(QWidget):
             grid.addWidget(clear_btn, row, 3)
             self.color_btns[key] = btn
             row += 1
-    
+
         self.font_btns = {}
         for fkey, flabel in FONT_LABELS:
             grid.addWidget(QLabel(self.tr(flabel)), row, 0)
@@ -131,7 +153,7 @@ class EditorTab(QWidget):
             self._refresh_font_btn(btn, fkey)
             btn.clicked.connect(lambda checked, k=fkey, b=btn: self._pick_font(k, b))
             grid.addWidget(btn, row, 2)
-    
+
             clear_f = QPushButton(self.tr("Reset"))
             clear_f.setFixedSize(RESET_BTN_WIDTH, RESET_BTN_HEIGHT)
             clear_f.setStyleSheet(RESET_BASE_STYLE)
@@ -139,12 +161,11 @@ class EditorTab(QWidget):
             grid.addWidget(clear_f, row, 3)
             self.font_btns[fkey] = btn
             row += 1
-    
+
         grid.setColumnStretch(1, 1)
         layout.addLayout(grid)
         layout.addStretch()
 
-    # ------------------------------------------------------------------
     def _refresh_color_btn(self, btn, key):
         stored = self._stored.get(key, SENTINEL)
         if stored == SENTINEL or stored == "" or stored is None:
@@ -168,7 +189,7 @@ class EditorTab(QWidget):
 
     def _refresh_font_btn(self, btn, key):
         stored = self._stored.get(key, SENTINEL)
-        btn.setFont(QFont())  # always standard UI font on the button itself
+        btn.setFont(QFont())
         btn.setStyleSheet(BTN_BASE_STYLE)
         if stored == SENTINEL or stored == "" or stored is None:
             btn.setText(self.tr("Default Value"))
@@ -176,10 +197,8 @@ class EditorTab(QWidget):
             f = QFont()
             f.fromString(stored)
             label = f"{f.family()}, {f.pointSize()}pt"
-            # Elide long font names so text never forces the fixed-size
-            # button to look truncated/overflowed differently across platforms.
             fm = QFontMetrics(btn.font())
-            available = btn.width() - 16  # rough padding allowance
+            available = btn.width() - 16
             elided = fm.elidedText(label, Qt.ElideRight, available)
             btn.setText(elided)
             btn.setToolTip(label)
@@ -201,3 +220,7 @@ class EditorTab(QWidget):
     def save(self):
         for key, stored in self._stored.items():
             self.settings.setValue(f"theme_{key}", stored if stored is not None else SENTINEL)
+        self.settings.setValue(
+            "editor/validate_timestamps",
+            self.validate_ts_cb.isChecked(),
+        )
