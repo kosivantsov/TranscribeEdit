@@ -29,6 +29,15 @@ A cross-platform desktop application that combines a media player with a real-ti
 ## Overview
 
 TranscribeEdit is designed for linguists, translators, journalists, and anyone who regularly listens to audio recordings and produces text transcriptions. It integrates a media player driven by [mpv](https://mpv.io/) with an interactive waveform display and a feature-rich plain-text editor in a single window, so you can listen, navigate, and type without switching applications.
+<p float="left">
+  <img src="https://github.com/user-attachments/assets/be9b963c-b8e1-4f2d-bb05-54ab8dc07df3" width="45%" />
+  <img src="https://github.com/user-attachments/assets/8d5120c9-a561-4eea-9532-4959f5234865" width="45%" />
+</p>
+<!--
+<img width="904" height="883" alt="image" src="https://github.com/user-attachments/assets/be9b963c-b8e1-4f2d-bb05-54ab8dc07df3" />
+<img width="904" height="883" alt="image" src="https://github.com/user-attachments/assets/8d5120c9-a561-4eea-9532-4959f5234865" />
+
+
 
 ---
 
