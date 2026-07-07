@@ -33,11 +33,6 @@ TranscribeEdit is designed for linguists, translators, journalists, and anyone w
   <img src="https://github.com/user-attachments/assets/be9b963c-b8e1-4f2d-bb05-54ab8dc07df3" width="45%" />
   <img src="https://github.com/user-attachments/assets/8d5120c9-a561-4eea-9532-4959f5234865" width="45%" />
 </p>
-<!--
-<img width="904" height="883" alt="image" src="https://github.com/user-attachments/assets/be9b963c-b8e1-4f2d-bb05-54ab8dc07df3" />
-<img width="904" height="883" alt="image" src="https://github.com/user-attachments/assets/8d5120c9-a561-4eea-9532-4959f5234865" />
-
-
 
 ---
 
@@ -55,7 +50,6 @@ TranscribeEdit is designed for linguists, translators, journalists, and anyone w
 | **Projects** | Self-contained `.teproj` ZIP bundle (audio + JSON data) restores exact playback position and cursor |
 | **Themes** | Dark/light auto-detection via `pyqtdarktheme`, fully configurable color/font overrides per UI element |
 | **Shortcuts** | Fully remappable keyboard shortcuts (stored per user) |
-<!-- | **i18n** | Qt translation framework; loads `transcribeedit_<locale>.qm` and Qt system strings automatically | -->
 
 ---
 
@@ -73,15 +67,25 @@ requests
 markdown
 ```
 
-### External binaries
+### External dependencies
 
-| Binary | Required? | Purpose |
+The application **starts normally even when external dependencies are absent**. Dependencies are only required when you attempt to open an audio file. If they are missing at that point, a clear error message explains what is needed and where to configure it.
+
+| Dependency | Required for audio? | Notes |
 |---|---|---|
 | **ffmpeg** | **Yes** | Decodes audio to 16 kHz WAV for waveform rendering; also used by the CLI transcription worker |
 | **ffprobe** | Optional | Media info |
-| **libmpv** (`libmpv.so.2` on Linux, `libmpv.dylib` on macOS) | **Yes (Linux/macOS)** | Backend audio playback via `python-mpv`; on Windows the DLL is bundled with the mpv distribution |
+| **libmpv** / **mpv-2.dll** | **Yes** | Backend audio playback via `python-mpv` |
 
-TranscribeEdit auto-discovers these paths on startup and prompts you to set them manually if they cannot be found.
+#### Dependency discovery order
+
+For each dependency, the app searches in this order:
+
+1. An explicitly configured path saved in **Preferences › Dependencies**.
+2. Bundled files placed **next to the application executable** or in a **`bin/` subdirectory** of the app folder.
+3. System-wide locations (PATH for binaries; standard library directories for shared libraries on Linux/macOS).
+
+If a path is set in Preferences and the file is found, that path is used immediately — no restart required.
 
 ---
 
@@ -119,19 +123,54 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 4. Install external dependencies
+### 4. Install or bundle external dependencies
 
-**Ubuntu/Debian:**
+#### Linux (Ubuntu/Debian)
 ```bash
 sudo apt install ffmpeg libmpv2
 ```
 
-**macOS (Homebrew):**
+#### macOS (Homebrew)
 ```bash
 brew install ffmpeg mpv
 ```
 
-**Windows:** Download [ffmpeg](https://ffmpeg.org/download.html) and place `ffmpeg.exe` next to `main.py`, or add it to your `PATH`. The mpv DLL required by `python-mpv` (`mpv-2.dll`) should be placed in the same directory.
+#### Windows — three supported setups
+
+TranscribeEdit supports three Windows packaging scenarios:
+
+**Scenario A — Bundled build (recommended for end-users)**
+
+Place `ffmpeg.exe` and `mpv-2.dll` either next to `main.py` or inside a `bin/` subdirectory:
+```
+TranscribeEdit/
+  main.py
+  ffmpeg.exe
+  mpv-2.dll
+```
+or inside `bin/`:
+```
+TranscribeEdit/
+  main.py
+  bin/
+   ffmpeg.exe
+   mpv-2.dll
+```
+
+The app discovers them automatically on startup. No manual configuration needed.
+
+**Scenario B — System-wide installation**
+
+Install [ffmpeg](https://ffmpeg.org/download.html) and [mpv](https://mpv.io/installation/) so that `ffmpeg.exe` is on your `PATH` and `mpv-2.dll` is discoverable (e.g. in a directory on `PATH`). The app finds them automatically.
+
+**Scenario C — Lean build with manual configuration**
+
+Run the app without any bundled or system-wide dependencies. The UI opens normally. When you try to open an audio file, a message tells you what is missing. Then:
+
+1. Open **Preferences › Dependencies** (`Ctrl+F12`).
+2. Browse to or type the paths for `ffmpeg.exe` and `mpv-2.dll`.
+3. Click **Save**.
+4. Try opening an audio file again — no restart required.
 
 ---
 
@@ -144,7 +183,7 @@ source venv/bin/activate   # Linux/macOS
 python main.py
 ```
 
-The application opens with a minimum window size of 900 × 850 px. The theme (dark/light) is chosen automatically from the OS preference.
+The application opens with a minimum window size of 900 × 850 px. The theme (dark/light) is chosen automatically from the OS preference. If external dependencies cannot be found, a non-blocking dialog appears on startup; you can dismiss it and configure paths later.
 
 ---
 
@@ -153,6 +192,8 @@ The application opens with a minimum window size of 900 × 850 px. The theme (da
 ### Loading audio
 
 Use **File > Open Audio** (`Ctrl+Shift+O`) to load an audio file. Supported formats (via mpv/ffmpeg): `mp3`, `wav`, `flac`, `ogg`, `m4a`, `aac`.
+
+If `ffmpeg` or `mpv` / `libmpv` are not yet available when you open a file, the app shows a descriptive error message instead of crashing. Set the missing paths in **Preferences › Dependencies** and try again — no restart needed.
 
 ### Playback controls
 
@@ -221,10 +262,10 @@ Configure in **Options > Cloud API Configuration**:
 
 | Field | Description |
 |---|---|
-| **URL** | REST endpoint (supports `${FILE}`, `${JOB_ID}`, and custom variable substitution) |
+| **URL** | REST endpoint (supports `${FILE}` and custom variable substitution) |
 | **Headers** | e.g., `Authorization: Bearer ${API_KEY}` |
 | **Response type** | `json (OpenAI/Lemonfox)`, `text`, `srt`, or `vtt` |
-| **Async polling** | Two-step upload → poll workflow; configure job ID key, poll URL, status key, ready/fail values, and interval |
+| **Async polling** | Two-step upload → poll workflow; configure job ID key, poll URL, status key, ready/fail values, etc. |
 
 ### Local CLI Tool (Handy)
 
@@ -234,7 +275,7 @@ Configure in **Options > Handy Tool Configuration**:
 |---|---|
 | **Binary path** | Path to the [Handy](https://handy.computer/about) executable |
 | **Model** | e.g., `Cohere`, `Parakeet`, `Canary`, etc. |
-| **Device** | e.g., `vulcan:0`, `cpu:1` |
+| **Device** | e.g., `vulcan:0`, `cpu:1`, etc |
 
 Once the executable path has been properly set, you can poll the Handy Tool and select both the model and the device from their respective drop-down lists.
 
@@ -277,7 +318,7 @@ A `.teproj` ZIP archive bundles the audio file + `data.json` (segments, raw text
 
 | Tab | Settings |
 |---|---|
-| **Dependencies** | Locate `ffmpeg`, `ffprobe`, `libmpv`; re-run auto-discovery |
+| **Dependencies** | Locate `ffmpeg`, `ffprobe`, and `libmpv` / `mpv-2.dll`; re-run auto-discovery |
 | **Export options** | Default format, Markdown/HTML templates |
 | **Speakers** | Define up to 6 speaker names |
 | **Editor** | Font, tab size, line wrap, timestamp validation |
@@ -341,7 +382,7 @@ A `.teproj` ZIP archive bundles the audio file + `data.json` (segments, raw text
 | Module | Responsibility |
 |---|---|
 | `main.py` | `AudioPlayer` — UI construction, signal wiring, entry point |
-| `playback_mixin.py` | All mpv playback state, A/B loop, waveform sync |
+| `playback_mixin.py` | All mpv playback state, A/B loop, waveform sync; lazy mpv import |
 | `io_mixin.py` | Project/JSON/audio I/O, transcription dispatch |
 | `dialogs_mixin.py` | Preferences, cloud config, Handy config dialogs |
 | `editor.py` | `TranscriptEditor` + syntax highlighter, fold, segment serialization |
@@ -360,3 +401,14 @@ A `.teproj` ZIP archive bundles the audio file + `data.json` (segments, raw text
 
 This project is licensed under the [MIT License](LICENSE).
 
+### Third-Party Software
+
+This application integrates with or may be bundled with the following open-source software, which are subject to their own licenses:
+
+- **[FFmpeg / FFprobe](https://ffmpeg.org/)**  
+  FFmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project. FFmpeg and FFprobe are licensed under the [GNU Lesser General Public License (LGPL)](https://www.gnu.org/licenses/lgpl-3.0.html) version 2.1 or later, or the [GNU General Public License (GPL)](https://www.gnu.org/licenses/gpl-3.0.html) version 2 or later, depending on the specific build used.
+
+- **[mpv / libmpv](https://mpv.io/)**  
+  mpv and its shared library are licensed under the [GNU General Public License (GPL)](https://www.gnu.org/licenses/gpl-2.0.html) version 2 or later. Some core parts are available under the LGPL.
+
+*Note: Bundled versions of these binaries in packaged releases of TranscribeEdit are provided unmodified from their respective upstream sources.*
