@@ -42,34 +42,29 @@ jobs:
             --hidden-import mpv `
             main.py
           
-          # Zip the single lean executable
+          # Manually zip the Lean executable
           Compress-Archive -Path dist/TranscribeEdit-Lean.exe -DestinationPath dist/TranscribeEdit-Windows-Lean-x86_64.zip
 
       - name: Download Windows External Dependencies (FFmpeg & mpv)
         shell: pwsh
         run: |
-          # Download FFmpeg
           Write-Host "Downloading FFmpeg..."
           Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile "ffmpeg.zip"
           Expand-Archive ffmpeg.zip -DestinationPath ffmpeg_temp
           Copy-Item "ffmpeg_temp/ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe" bin/
           Copy-Item "ffmpeg_temp/ffmpeg-master-latest-win64-gpl/bin/ffprobe.exe" bin/
           
-          # Download MPV
           Write-Host "Downloading MPV..."
           $mpvRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest"
-          # Match any mpv-dev- zip/7z that is x86_64
           $mpvAsset = $mpvRelease.assets | Where-Object { $_.name -match "mpv-dev-.*x86_64-.*\.7z" } | Select-Object -First 1
           Invoke-WebRequest -Uri $mpvAsset.browser_download_url -OutFile "mpv.7z"
           
-          # Extract specifically libmpv-2.dll from anywhere in the archive directly into bin/
           7z e mpv.7z -r libmpv-2.dll -obin
           Rename-Item bin/libmpv-2.dll mpv-2.dll
 
       - name: Build Windows Full (Bundled Deps Folder)
         shell: pwsh
         run: |
-          # Notice we removed --onefile here
           pyinstaller --noconsole --name "TranscribeEdit-Full" `
             --icon="icons/transcribeedit.ico" `
             --add-binary "bin/ffmpeg.exe;bin" `
@@ -80,13 +75,13 @@ jobs:
             --hidden-import mpv `
             main.py
           
-          # Zip the entire generated folder
+          # Manually zip the Full folder
           Compress-Archive -Path dist/TranscribeEdit-Full -DestinationPath dist/TranscribeEdit-Windows-Full-x86_64.zip
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: TranscribeEdit-Windows
+          name: TranscribeEdit-Windows-Zips
           path: dist/*.zip
 
   build-macos:
@@ -96,9 +91,9 @@ jobs:
       matrix:
         include:
           - arch: x86_64
-            runner: macos-13 # Intel runner
+            runner: macos-13
           - arch: arm64
-            runner: macos-14 # Apple Silicon runner
+            runner: macos-14
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout Code
@@ -128,13 +123,14 @@ jobs:
             --hidden-import mpv \
             main.py
           
+          # Manually zip the App bundle
           cd dist
           zip -ry TranscribeEdit-macOS-${{ matrix.arch }}.zip TranscribeEdit.app
 
       - name: Upload macOS Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: TranscribeEdit-macOS-${{ matrix.arch }}
+          name: TranscribeEdit-macOS-${{ matrix.arch }}-Zip
           path: dist/TranscribeEdit-macOS-*.zip
 
   build-linux:
@@ -155,17 +151,15 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          # Install PyQt5 via apt to bypass pip compilation issues on ARM
-          sudo apt-get install -y libgl1 libegl1 libxcb-xinerama0 curl file fuse libfuse2 python3-pyqt5 python3-pip python3-venv
+          # Added python3-pyqt5.qtsvg to ensure icons render correctly in the Linux App
+          sudo apt-get install -y libgl1 libegl1 libxcb-xinerama0 curl file fuse libfuse2 python3-pyqt5 python3-pyqt5.qtsvg python3-pip python3-venv
 
       - name: Setup Virtual Environment with System Packages
         run: |
-          # Use system-site-packages so the venv can see python3-pyqt5
           python3 -m venv --system-site-packages myenv
           source myenv/bin/activate
           python -m pip install --upgrade pip
           
-          # Remove PyQt5 from requirements.txt since we rely on the apt package
           grep -iv "PyQt5" requirements.txt > req_no_qt.txt || true
           pip install -r req_no_qt.txt
           pip install pyinstaller
@@ -190,7 +184,6 @@ jobs:
           
           cp -r dist/TranscribeEdit/* AppDir/usr/bin/
           
-          # Explicitly copy icons to all required AppImage locations
           cp icons/transcribeedit.png AppDir/TranscribeEdit.png
           cp icons/transcribeedit.png AppDir/.DirIcon
           cp icons/transcribeedit.png AppDir/usr/share/icons/hicolor/256x256/apps/TranscribeEdit.png
