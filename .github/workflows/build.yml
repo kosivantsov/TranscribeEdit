@@ -150,8 +150,11 @@ jobs:
 
       - name: Install System Dependencies
         run: |
+          # Remove flaky Microsoft repos that we don't need, which cause apt-get update to fail
+          sudo rm -f /etc/apt/sources.list.d/azure-cli.list
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
+          
           sudo apt-get update
-          # Added python3-pyqt5.qtsvg to ensure icons render correctly in the Linux App
           sudo apt-get install -y libgl1 libegl1 libxcb-xinerama0 curl file fuse libfuse2 python3-pyqt5 python3-pyqt5.qtsvg python3-pip python3-venv
 
       - name: Setup Virtual Environment with System Packages
