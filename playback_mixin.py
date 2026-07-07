@@ -5,11 +5,15 @@ Contains all audio playback state and methods:
   play/pause/stop, seeking, speed, volume, A/B loop markers,
   waveform position sync, jump dialog, timestamp insertion,
   always-on-top toggle.
+
+mpv is imported lazily (only when audio is actually opened) so that the
+application starts successfully even when libmpv / mpv-2.dll is absent.
 """
 import locale
 import os
+import sys
+import platform
 
-import mpv
 from PyQt5.QtWidgets import QApplication, QMessageBox
 from PyQt5.QtCore import Qt, QTimer
 
@@ -40,8 +44,132 @@ class PlaybackMixin:
         self._loop_seek_pending = False
         self._loop_seek_target = None
 
+    # -------------------------------------------------------- dependency helpers
+
+    def _bundled_dirs(self):
+        """Return candidate directories that may contain bundled binaries/DLLs."""
+        if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+            base = sys._MEIPASS
+        else:
+            base = os.path.dirname(os.path.abspath(sys.argv[0]))
+        return [base, os.path.join(base, "bin")]
+
+    def _resolve_ffmpeg(self):
+        """Return the ffmpeg executable path to use, or None if unavailable."""
+        import shutil
+
+        configured = get_dep_path(self.settings, "dep_ffmpeg")
+        if configured and os.path.isfile(configured):
+            return configured
+
+        exe = "ffmpeg.exe" if platform.system() == "Windows" else "ffmpeg"
+        for d in self._bundled_dirs():
+            candidate = os.path.join(d, exe)
+            if os.path.isfile(candidate):
+                return candidate
+
+        return shutil.which("ffmpeg") or None
+
+    def _resolve_mpv_dll_dir(self):
+        """Windows only: return the directory containing the mpv DLL, or None."""
+        dll_names = ["mpv-2.dll", "libmpv-2.dll", "mpv-1.dll"]
+
+        configured = get_dep_path(self.settings, "dep_mpv_lib")
+        if configured and os.path.isfile(configured):
+            return os.path.dirname(configured)
+
+        for d in self._bundled_dirs():
+            for name in dll_names:
+                if os.path.isfile(os.path.join(d, name)):
+                    return d
+
+        return None  # fall through to PATH
+
+    def _resolve_libmpv_path(self):
+        """Linux/macOS only: return explicit libmpv path if configured, else None."""
+        configured = get_dep_path(self.settings, "dep_mpv_lib")
+        if configured and os.path.isfile(configured):
+            return configured
+        return None
+
+    def _import_mpv_lazy(self):
+        """Try to import the 'mpv' Python module lazily.
+
+        On Windows, prepend the DLL directory to PATH so that python-mpv /
+        ctypes can find mpv-2.dll.
+        On Linux/macOS, if an explicit libmpv path is configured, set
+        MPV_LIBRARY_PATH before import so python-mpv uses it.
+
+        Clears any previously cached failed import so the user can fix paths
+        and retry without restarting the application.
+
+        Returns the mpv module, or raises ImportError with a descriptive
+        message if it cannot be loaded.
+        """
+        sys.modules.pop("mpv", None)
+
+        if platform.system() == "Windows":
+            dll_dir = self._resolve_mpv_dll_dir()
+            if dll_dir:
+                path_env = os.environ.get("PATH", "")
+                if dll_dir not in path_env.split(os.pathsep):
+                    os.environ["PATH"] = dll_dir + os.pathsep + path_env
+        else:
+            lib_path = self._resolve_libmpv_path()
+            if lib_path:
+                os.environ["MPV_LIBRARY_PATH"] = lib_path
+
+        import mpv as _mpv  # noqa: PLC0415
+        return _mpv
+
+    def _missing_deps_message(self, missing_ffmpeg, missing_mpv):
+        """Build a user-facing message listing what is missing and how to fix it."""
+        lines = [self.tr("The following dependencies required for audio playback could not be found:"), ""]
+
+        if missing_ffmpeg:
+            lines.append(self.tr("• ffmpeg — needed for waveform rendering."))
+        if missing_mpv:
+            if platform.system() == "Windows":
+                lines += [
+                    self.tr("• mpv (mpv-2.dll) — needed for audio playback."),
+                    "",
+                    self.tr("To fix this on Windows, choose one of:"),
+                    self.tr("  1. Place mpv-2.dll next to the application or in the bin/ subdirectory."),
+                    self.tr("  2. Install mpv system-wide so that mpv-2.dll is on your PATH."),
+                    self.tr("  3. Set its path in Preferences › Dependencies."),
+                ]
+            else:
+                lines += [
+                    self.tr("• libmpv — needed for audio playback."),
+                    "",
+                    self.tr("Install it via your package manager (e.g. 'sudo apt install libmpv2'"),
+                    self.tr("or 'brew install mpv'), or set the library path in Preferences › Dependencies."),
+                ]
+        return "\n".join(lines)
+
     # ------------------------------------------------------------------ audio loading
     def _open_audio_path(self, path):
+        # --- 1. Resolve ffmpeg before touching anything ---
+        ffmpeg_path = self._resolve_ffmpeg()
+        missing_ffmpeg = ffmpeg_path is None
+
+        # --- 2. Resolve and lazily import mpv ---
+        mpv_module = None
+        missing_mpv = False
+        try:
+            mpv_module = self._import_mpv_lazy()
+        except Exception:
+            missing_mpv = True
+
+        if missing_ffmpeg or missing_mpv:
+            QMessageBox.warning(
+                self,
+                self.tr("Missing Dependencies"),
+                self._missing_deps_message(missing_ffmpeg, missing_mpv),
+            )
+            return
+
+        # --- 3. All deps present — proceed with load ---
         self.audio_file = path
         self.file_label.setText(os.path.basename(path))
 
@@ -52,9 +180,6 @@ class PlaybackMixin:
         self._update_loop_markers()
 
         try:
-            ffmpeg_path = get_dep_path(self.settings, "dep_ffmpeg")
-            if not ffmpeg_path:
-                ffmpeg_path = "ffmpeg"
             self.duration = self.waveform.load_audio_ffmpeg(path, ffmpeg_path)
             self.waveform.callback_seek = self.seek_to
         except Exception as e:
@@ -73,7 +198,7 @@ class PlaybackMixin:
         except locale.Error:
             pass
 
-        self.player = mpv.MPV(input_default_bindings=True, osc=False)
+        self.player = mpv_module.MPV(input_default_bindings=True, osc=False)
         self.player.pause = True
         self.player.volume = self.volume
         self.player.play(path)

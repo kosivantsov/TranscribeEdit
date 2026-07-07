@@ -22,15 +22,32 @@ def _get_dep_definitions():
             "candidates_lin": ["ffprobe"], "browse_filter": "Executables (ffprobe ffprobe.exe);;All Files (*)",
         },
     ]
-    if sys_name in ("Linux", "Darwin"):
+
+    if sys_name == "Windows":
+        defs.append({
+            "key": "dep_mpv_lib",
+            "name": "mpv (DLL)",
+            "description": "mpv shared library for audio playback (mpv-2.dll)",
+            "is_library": True,
+            "candidates_win": ["mpv-2.dll", "libmpv-2.dll", "mpv-1.dll"],
+            "candidates_mac": [],
+            "candidates_lin": [],
+            "browse_filter": "DLL Files (*.dll);;All Files (*)",
+        })
+    elif sys_name in ("Linux", "Darwin"):
         lib_name = "libmpv.so.2" if sys_name == "Linux" else "libmpv.dylib"
         alt_names = ["libmpv.so.1", "libmpv.so"] if sys_name == "Linux" else ["libmpv.2.dylib", "libmpv.1.dylib"]
-        filter_str = "Shared Libraries (libmpv*.so*);;All Files (*)" if sys_name == "Linux" else "Dynamic Libraries (libmpv*.dylib);;All Files (*)"
+        filter_str = (
+            "Shared Libraries (libmpv*.so*);;All Files (*)"
+            if sys_name == "Linux"
+            else "Dynamic Libraries (libmpv*.dylib);;All Files (*)"
+        )
         defs.append({
             "key": "dep_mpv_lib", "name": "libmpv", "description": f"mpv shared library ({lib_name})",
             "is_library": True, "candidates_win": [], "candidates_mac": alt_names + [lib_name],
             "candidates_lin": [lib_name] + alt_names, "browse_filter": filter_str,
         })
+
     return defs
 
 
@@ -41,6 +58,12 @@ def _base_dir():
     if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
         return sys._MEIPASS
     return os.path.dirname(os.path.abspath(sys.argv[0]))
+
+
+def _search_dirs():
+    """Return the base app directory and its bin/ subdirectory as candidates."""
+    base = _base_dir()
+    return [base, os.path.join(base, "bin")]
 
 
 def resolve_dep_path(stored: str) -> str:
@@ -63,29 +86,36 @@ def _make_stored_path(abs_path: str) -> str:
 
 
 def discover_dep(dep: dict) -> str:
-    base = _base_dir()
-    names = dep["candidates_win"] if platform.system() == "Windows" else (
-        dep["candidates_mac"] if platform.system() == "Darwin" else dep["candidates_lin"]
+    sys_name = platform.system()
+    names = dep["candidates_win"] if sys_name == "Windows" else (
+        dep["candidates_mac"] if sys_name == "Darwin" else dep["candidates_lin"]
     )
 
-    for name in names:
-        if os.path.isfile(os.path.join(base, name)):
-            return os.path.join(base, name)
+    # Search base dir and bin/ subdirectory for bundled copies.
+    for search_dir in _search_dirs():
+        for name in names:
+            candidate = os.path.join(search_dir, name)
+            if os.path.isfile(candidate):
+                return candidate
 
     if dep["is_library"]:
-        search_dirs = [
-            "/usr/lib", "/usr/local/lib", "/usr/lib/x86_64-linux-gnu",
-            "/usr/lib64", "/opt/homebrew/lib", "/opt/local/lib"
-        ]
-        for d in search_dirs:
-            for name in names:
-                if os.path.exists(os.path.join(d, name)):
-                    return os.path.join(d, name)
+        if sys_name != "Windows":
+            search_lib_dirs = [
+                "/usr/lib", "/usr/local/lib", "/usr/lib/x86_64-linux-gnu",
+                "/usr/lib/aarch64-linux-gnu", "/usr/lib64",
+                "/opt/homebrew/lib", "/opt/local/lib",
+            ]
+            for d in search_lib_dirs:
+                for name in names:
+                    candidate = os.path.join(d, name)
+                    if os.path.exists(candidate):
+                        return candidate
     else:
         for name in names:
             found = shutil.which(name)
             if found:
                 return found
+
     return ""
 
 
@@ -119,6 +149,8 @@ class DepsTab(QWidget):
 
         info = QLabel(self.tr(
             "Set paths to required external tools.\n"
+            "The app launches even when dependencies are missing, but audio loading requires them.\n"
+            "Bundled files can be placed next to the application or in a bin/ subdirectory.\n"
             "Fields with red borders are invalid. Relative paths are kept when placed next to the binary."
         ))
         info.setWordWrap(True)
@@ -177,9 +209,9 @@ class DepsTab(QWidget):
         scroll.setWidget(container)
         outer.addWidget(scroll)
 
-        btn = QPushButton(self.tr("Re-run Auto-Discovery"))
-        btn.clicked.connect(self._rediscover)
-        outer.addWidget(btn)
+        rediscover_btn = QPushButton(self.tr("Re-run Auto-Discovery"))
+        rediscover_btn.clicked.connect(self._rediscover)
+        outer.addWidget(rediscover_btn)
 
     def _rediscover(self):
         for dep in DEP_DEFINITIONS:
@@ -205,7 +237,8 @@ class DepsDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(self.tr(
             "<b>Some required external tools could not be found automatically.</b><br>"
-            "Please locate them below."
+            "Please locate them below, or click Skip to continue — "
+            "you can set paths later in <b>Preferences &rsaquo; Dependencies</b>."
         )))
         self.widget = DepsTab(self, settings, missing_only=missing_only)
         layout.addWidget(self.widget, 1)
