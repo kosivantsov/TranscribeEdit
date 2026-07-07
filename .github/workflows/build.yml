@@ -33,6 +33,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path icons
 
       - name: Build Windows Lean (No Deps)
+        shell: pwsh
         run: |
           pyinstaller --noconsole --onefile --name "TranscribeEdit-Lean" `
             --icon="icons/transcribeedit.ico" `
@@ -40,6 +41,9 @@ jobs:
             --add-data "translations;translations" `
             --hidden-import mpv `
             main.py
+          
+          # Zip the single lean executable
+          Compress-Archive -Path dist/TranscribeEdit-Lean.exe -DestinationPath dist/TranscribeEdit-Windows-Lean-x86_64.zip
 
       - name: Download Windows External Dependencies (FFmpeg & mpv)
         shell: pwsh
@@ -48,21 +52,25 @@ jobs:
           Write-Host "Downloading FFmpeg..."
           Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile "ffmpeg.zip"
           Expand-Archive ffmpeg.zip -DestinationPath ffmpeg_temp
-          Copy-Item ffmpeg_temp/*/bin/ffmpeg.exe bin/
-          Copy-Item ffmpeg_temp/*/bin/ffprobe.exe bin/
+          Copy-Item "ffmpeg_temp/ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe" bin/
+          Copy-Item "ffmpeg_temp/ffmpeg-master-latest-win64-gpl/bin/ffprobe.exe" bin/
           
           # Download MPV
           Write-Host "Downloading MPV..."
           $mpvRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest"
-          $mpvAsset = $mpvRelease.assets | Where-Object { $_.name -match "mpv-dev-x86_64-.*\.7z" } | Select-Object -First 1
+          # Match any mpv-dev- zip/7z that is x86_64
+          $mpvAsset = $mpvRelease.assets | Where-Object { $_.name -match "mpv-dev-.*x86_64-.*\.7z" } | Select-Object -First 1
           Invoke-WebRequest -Uri $mpvAsset.browser_download_url -OutFile "mpv.7z"
           
-          7z e mpv.7z *-dev/libmpv-2.dll -obin
+          # Extract specifically libmpv-2.dll from anywhere in the archive directly into bin/
+          7z e mpv.7z -r libmpv-2.dll -obin
           Rename-Item bin/libmpv-2.dll mpv-2.dll
 
-      - name: Build Windows Full (Bundled Deps)
+      - name: Build Windows Full (Bundled Deps Folder)
+        shell: pwsh
         run: |
-          pyinstaller --noconsole --onefile --name "TranscribeEdit-Full" `
+          # Notice we removed --onefile here
+          pyinstaller --noconsole --name "TranscribeEdit-Full" `
             --icon="icons/transcribeedit.ico" `
             --add-binary "bin/ffmpeg.exe;bin" `
             --add-binary "bin/ffprobe.exe;bin" `
@@ -71,16 +79,27 @@ jobs:
             --add-data "translations;translations" `
             --hidden-import mpv `
             main.py
+          
+          # Zip the entire generated folder
+          Compress-Archive -Path dist/TranscribeEdit-Full -DestinationPath dist/TranscribeEdit-Windows-Full-x86_64.zip
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: TranscribeEdit-Windows
-          path: dist/*.exe
+          path: dist/*.zip
 
   build-macos:
-    name: Build macOS (Universal)
-    runs-on: macos-latest
+    name: Build macOS (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: macos-13 # Intel runner
+          - arch: arm64
+            runner: macos-14 # Apple Silicon runner
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -102,7 +121,7 @@ jobs:
       - name: Build macOS App
         run: |
           pyinstaller --noconsole --windowed --name "TranscribeEdit" \
-            --target-arch universal2 \
+            --target-arch ${{ matrix.arch }} \
             --icon="icons/transcribeedit.icns" \
             --add-data "icons:icons" \
             --add-data "translations:translations" \
@@ -110,13 +129,13 @@ jobs:
             main.py
           
           cd dist
-          zip -ry TranscribeEdit-macOS-Universal.zip TranscribeEdit.app
+          zip -ry TranscribeEdit-macOS-${{ matrix.arch }}.zip TranscribeEdit.app
 
       - name: Upload macOS Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: TranscribeEdit-macOS
-          path: dist/TranscribeEdit-macOS-Universal.zip
+          name: TranscribeEdit-macOS-${{ matrix.arch }}
+          path: dist/TranscribeEdit-macOS-*.zip
 
   build-linux:
     name: Build Linux AppImage (${{ matrix.arch }})
@@ -136,17 +155,19 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgl1 libegl1 libxcb-xinerama0 curl file fuse libfuse2
+          # Install PyQt5 via apt to bypass pip compilation issues on ARM
+          sudo apt-get install -y libgl1 libegl1 libxcb-xinerama0 curl file fuse libfuse2 python3-pyqt5 python3-pip python3-venv
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install Python Dependencies
+      - name: Setup Virtual Environment with System Packages
         run: |
+          # Use system-site-packages so the venv can see python3-pyqt5
+          python3 -m venv --system-site-packages myenv
+          source myenv/bin/activate
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          
+          # Remove PyQt5 from requirements.txt since we rely on the apt package
+          grep -iv "PyQt5" requirements.txt > req_no_qt.txt || true
+          pip install -r req_no_qt.txt
           pip install pyinstaller
 
       - name: Create required directories
@@ -154,7 +175,9 @@ jobs:
 
       - name: Build PyInstaller Folder
         run: |
+          source myenv/bin/activate
           pyinstaller --noconsole --name "TranscribeEdit" \
+            --icon="icons/transcribeedit.png" \
             --add-data "icons:icons" \
             --add-data "translations:translations" \
             --hidden-import mpv \
@@ -167,13 +190,10 @@ jobs:
           
           cp -r dist/TranscribeEdit/* AppDir/usr/bin/
           
-          # Create a dummy icon if it doesn't exist
-          if [ ! -f "icons/transcribeedit.png" ]; then
-            touch icons/transcribeedit.png
-          fi
-          
+          # Explicitly copy icons to all required AppImage locations
           cp icons/transcribeedit.png AppDir/TranscribeEdit.png
           cp icons/transcribeedit.png AppDir/.DirIcon
+          cp icons/transcribeedit.png AppDir/usr/share/icons/hicolor/256x256/apps/TranscribeEdit.png
           
           cat << 'EOF' > AppDir/TranscribeEdit.desktop
           [Desktop Entry]
